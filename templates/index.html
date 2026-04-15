@@ -57,6 +57,8 @@
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="monthly">Monthly Top 5</button>
     <button class="tab-btn" data-tab="trends">Category Trends</button>
+    <button class="tab-btn" data-tab="gpu">GPU Pricing</button>
+    <button class="tab-btn" data-tab="energy">Energy Demand</button>
   </div>
 </div>
 
@@ -113,6 +115,104 @@
         <div id="trends-legend" class="flex flex-wrap gap-x-5 gap-y-2"></div>
       </div>
     </section>
+  </main>
+</div>
+
+<!-- ── Energy Demand tab ──────────────────────────────────────────────────── -->
+<div id="tab-energy" style="display:none;">
+  <main class="max-w-screen-xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Header card -->
+    <section class="card rounded-xl overflow-hidden">
+      <div class="px-5 py-3 flex items-center justify-between flex-wrap gap-3" style="border-bottom:1px solid #30363d;">
+        <div class="flex items-center gap-3">
+          <span class="category-badge" style="background:#1a2a1a;color:#3fb950;border:1px solid #3fb95044;">Grid Electricity Demand</span>
+          <span class="text-xs neutral">EIA · 7-day rolling avg · 365-day history · megawatt-hours/hr</span>
+        </div>
+        <button id="eia-refresh-btn"
+          class="text-xs px-3 py-1 rounded-md font-medium"
+          style="background:#238636;color:#fff;border:1px solid #2ea043;"
+          onmouseover="this.style.background='#2ea043'" onmouseout="this.style.background='#238636'">
+          ↻ Refresh
+        </button>
+      </div>
+
+      <!-- Summary cards -->
+      <div id="eia-summary" class="px-5 py-4 flex flex-wrap gap-4 border-b" style="border-color:#21262d;"></div>
+
+      <!-- Chart -->
+      <div class="p-5">
+        <div id="eia-chart" style="height:380px;border-radius:6px;overflow:hidden;">
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+            <p class="text-sm neutral">Add your EIA API key to load energy demand data.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="px-5 pb-5">
+        <div id="eia-legend" class="flex flex-wrap gap-x-5 gap-y-2"></div>
+      </div>
+    </section>
+
+    <!-- Signal card -->
+    <section class="card rounded-xl overflow-hidden">
+      <div class="px-5 py-3" style="border-bottom:1px solid #30363d;">
+        <span class="text-xs font-semibold" style="color:#8b949e;text-transform:uppercase;letter-spacing:.06em;">Investment Signal</span>
+      </div>
+      <div id="eia-signal" class="px-5 py-4 text-sm neutral">
+        Rising electricity demand in data center hubs (PJM/Virginia) signals expanding AI compute workloads — bullish for EQIX, DLR, NVDA, VRT, ETN.
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ── GPU Pricing tab ───────────────────────────────────────────────────── -->
+<div id="tab-gpu" style="display:none;">
+  <main class="max-w-screen-xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Header card -->
+    <section class="card rounded-xl overflow-hidden">
+      <div class="px-5 py-3 flex items-center justify-between flex-wrap gap-3" style="border-bottom:1px solid #30363d;">
+        <div class="flex items-center gap-3">
+          <span class="category-badge" style="background:#1a1a2a;color:#388bfd;border:1px solid #388bfd44;">GPU Spot Prices</span>
+          <span class="text-xs neutral">AWS EC2 · us-east-1 · median $/GPU/hr · 90-day history</span>
+        </div>
+        <button id="gpu-refresh-btn"
+          class="text-xs px-3 py-1 rounded-md font-medium"
+          style="background:#238636;color:#fff;border:1px solid #2ea043;"
+          onmouseover="this.style.background='#2ea043'" onmouseout="this.style.background='#238636'">
+          ↻ Refresh
+        </button>
+      </div>
+
+      <!-- Current prices summary row -->
+      <div id="gpu-summary" class="px-5 py-4 flex flex-wrap gap-4 border-b" style="border-color:#21262d;"></div>
+
+      <!-- Chart -->
+      <div class="p-5">
+        <div id="gpu-chart" style="height:380px;border-radius:6px;overflow:hidden;">
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+            <p class="text-sm neutral">Loading GPU pricing data…</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="px-5 pb-5">
+        <div id="gpu-legend" class="flex flex-wrap gap-x-5 gap-y-2"></div>
+      </div>
+    </section>
+
+    <!-- Signal card -->
+    <section class="card rounded-xl overflow-hidden">
+      <div class="px-5 py-3" style="border-bottom:1px solid #30363d;">
+        <span class="text-xs font-semibold" style="color:#8b949e;text-transform:uppercase;letter-spacing:.06em;">Investment Signal</span>
+      </div>
+      <div id="gpu-signal" class="px-5 py-4 text-sm neutral">Loading…</div>
+    </section>
+
   </main>
 </div>
 
@@ -645,12 +745,30 @@ function switchTab(name) {
   document.getElementById('tab-dashboard').style.display = name === 'dashboard' ? '' : 'none';
   document.getElementById('tab-monthly').style.display   = name === 'monthly'   ? '' : 'none';
   document.getElementById('tab-trends').style.display    = name === 'trends'    ? '' : 'none';
+  document.getElementById('tab-gpu').style.display       = name === 'gpu'       ? '' : 'none';
+  document.getElementById('tab-energy').style.display    = name === 'energy'    ? '' : 'none';
   if (name === 'trends') {
     if (!trendsLoaded) { trendsLoaded = true; loadTrends('2y'); }
     else if (trendsChart) {
       const c = document.getElementById('trends-chart');
       trendsChart.resize(c.clientWidth, 420);
       trendsChart.timeScale().fitContent();
+    }
+  }
+  if (name === 'gpu') {
+    if (!gpuLoaded) { gpuLoaded = true; loadGpuPrices(); }
+    else if (gpuChart) {
+      const c = document.getElementById('gpu-chart');
+      gpuChart.resize(c.clientWidth, 380);
+      gpuChart.timeScale().fitContent();
+    }
+  }
+  if (name === 'energy') {
+    if (!eiaLoaded) { eiaLoaded = true; loadEiaDemand(); }
+    else if (eiaChart) {
+      const c = document.getElementById('eia-chart');
+      eiaChart.resize(c.clientWidth, 380);
+      eiaChart.timeScale().fitContent();
     }
   }
 }
@@ -859,6 +977,356 @@ document.getElementById('month-picker').addEventListener('keydown', e => { if (e
   picker.max   = new Date().toISOString().slice(0, 7);
   picker.min   = '2020-01';
 })();
+
+// ── EIA Energy Demand ────────────────────────────────────────────────────────
+const EIA_COLORS = {
+  "PJM":  "#388bfd",
+  "CAL":  "#3fb950",
+  "TEX":  "#e3b341",
+  "MISO": "#a371f7",
+};
+
+let eiaChart = null;
+let eiaSeries = {};
+let eiaData = null;
+let activeRegions = new Set();
+let eiaResizeObs = null;
+let eiaLoaded = false;
+
+async function loadEiaDemand() {
+  const btn = document.getElementById('eia-refresh-btn');
+  btn.textContent = '⟳ Loading…'; btn.disabled = true;
+  document.getElementById('eia-chart').innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="text-sm neutral">Fetching 365-day grid demand from EIA…</span></div>';
+  document.getElementById('eia-summary').innerHTML = '';
+  document.getElementById('eia-legend').innerHTML = '';
+  document.getElementById('eia-signal').innerHTML = '<span class="neutral">Loading…</span>';
+
+  if (eiaChart) { eiaChart.remove(); eiaChart = null; }
+  if (eiaResizeObs) { eiaResizeObs.disconnect(); eiaResizeObs = null; }
+  eiaSeries = {};
+
+  try {
+    const res = await fetch('/api/eia-demand');
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (!data.regions || Object.keys(data.regions).length === 0)
+      throw new Error('No data returned — check EIA_API_KEY in .env');
+    eiaData = data;
+    renderEiaChart(data);
+    renderEiaSummary(data);
+    renderEiaSignal(data);
+  } catch (err) {
+    document.getElementById('eia-chart').innerHTML =
+      `<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="negative text-sm">Error: ${err.message}</span></div>`;
+    document.getElementById('eia-signal').innerHTML = `<span class="negative">${err.message}</span>`;
+  } finally {
+    btn.textContent = '↻ Refresh'; btn.disabled = false;
+  }
+}
+
+function renderEiaChart(data) {
+  activeRegions = new Set(Object.keys(data.regions));
+  const container = document.getElementById('eia-chart');
+  container.innerHTML = '';
+
+  eiaChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 380,
+    layout: { background: { type: 'solid', color: '#0d1117' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScroll: true,
+    handleScale: true,
+  });
+
+  for (const [id, region] of Object.entries(data.regions)) {
+    if (!region.smooth || !region.smooth.length) continue;
+    const ls = eiaChart.addLineSeries({
+      color: EIA_COLORS[id] || '#8b949e',
+      lineWidth: 2,
+      title: region.label,
+      priceFormat: { type: 'price', precision: 0, minMove: 1 },
+    });
+    ls.setData(region.smooth);
+    eiaSeries[id] = ls;
+  }
+
+  eiaChart.timeScale().fitContent();
+  renderEiaLegend();
+
+  eiaResizeObs = new ResizeObserver(entries => {
+    if (eiaChart && entries[0]) eiaChart.resize(entries[0].contentRect.width, 380);
+  });
+  eiaResizeObs.observe(container);
+}
+
+function renderEiaLegend() {
+  if (!eiaData) return;
+  document.getElementById('eia-legend').innerHTML = Object.entries(eiaData.regions).map(([id, region]) => {
+    const isActive = activeRegions.has(id);
+    const dot = isActive ? (EIA_COLORS[id] || '#8b949e') : '#30363d';
+    const mw = region.latest_mw ? (region.latest_mw / 1000).toFixed(1) + ' GW' : '—';
+    const trendCls = region.trend_pct > 0 ? 'positive' : region.trend_pct < 0 ? 'negative' : 'neutral';
+    const trendStr = region.trend_pct !== null
+      ? `${region.trend_pct >= 0 ? '+' : ''}${region.trend_pct.toFixed(1)}% 30d`
+      : '';
+    return `
+      <div class="flex items-center gap-1.5 cursor-pointer select-none"
+           onclick="toggleRegion('${id}')"
+           style="opacity:${isActive ? 1 : 0.35};transition:opacity .15s;"
+           title="${isActive ? 'Click to hide' : 'Click to show'}">
+        <div style="width:10px;height:10px;border-radius:50%;background:${dot};flex-shrink:0;"></div>
+        <span class="text-xs" style="color:#e6edf3;${isActive ? '' : 'text-decoration:line-through;'}">${region.label}</span>
+        <span class="text-xs font-mono" style="color:#8b949e;">${mw}</span>
+        <span class="text-xs font-mono ${trendCls}">${trendStr}</span>
+      </div>`;
+  }).join('');
+}
+
+function toggleRegion(id) {
+  const s = eiaSeries[id];
+  if (!s) return;
+  if (activeRegions.has(id)) { activeRegions.delete(id); s.applyOptions({ visible: false }); }
+  else                       { activeRegions.add(id);    s.applyOptions({ visible: true });  }
+  renderEiaLegend();
+}
+
+function renderEiaSummary(data) {
+  document.getElementById('eia-summary').innerHTML = Object.entries(data.regions).map(([id, region]) => {
+    const color = EIA_COLORS[id] || '#8b949e';
+    const mw = region.latest_mw ? (region.latest_mw / 1000).toFixed(1) : '—';
+    const trendCls = region.trend_pct > 2 ? 'positive' : region.trend_pct < -2 ? 'negative' : 'neutral';
+    const yoyCls   = region.yoy_avg > 2  ? 'positive' : region.yoy_avg  < -2  ? 'negative' : 'neutral';
+    return `
+      <div class="metric-card flex-1" style="min-width:160px;border-color:${color}33;">
+        <div class="text-xs mb-1 font-semibold" style="color:${color};">${region.label}</div>
+        <div class="text-lg font-bold" style="color:#e6edf3;">${mw}<span class="text-xs font-normal neutral"> GW avg</span></div>
+        <div class="flex gap-3 mt-0.5">
+          <span class="text-xs ${trendCls}">30d: ${region.trend_pct !== null ? (region.trend_pct >= 0 ? '+' : '') + region.trend_pct.toFixed(1) + '%' : '—'}</span>
+          <span class="text-xs ${yoyCls}">YoY: ${region.yoy_avg !== null ? (region.yoy_avg >= 0 ? '+' : '') + region.yoy_avg.toFixed(1) + '%' : '—'}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderEiaSignal(data) {
+  const signals = [];
+  for (const [id, region] of Object.entries(data.regions)) {
+    const t = region.trend_pct;
+    const y = region.yoy_avg;
+    if (t === null) continue;
+    const strength = (t > 5 && y > 5) ? 'Strong ↑ Bullish'
+                   : (t > 2 || y > 2)  ? '↑ Mildly Bullish'
+                   : (t < -5 && y < -5) ? 'Strong ↓ Bearish'
+                   : (t < -2 || y < -2) ? '↓ Mildly Bearish'
+                   : '→ Neutral';
+    const cls = strength.includes('Bullish') ? 'positive'
+              : strength.includes('Bearish') ? 'negative' : 'neutral';
+    const color = EIA_COLORS[id] || '#8b949e';
+    signals.push(`
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-semibold" style="color:${color};min-width:200px;">${region.label}</span>
+        <span class="text-xs font-medium ${cls}">${strength}</span>
+        <span class="text-xs neutral">(30d ${t >= 0 ? '+' : ''}${t.toFixed(1)}% · YoY ${y !== null ? (y >= 0 ? '+' : '') + y.toFixed(1) + '%' : '—'})</span>
+      </div>`);
+  }
+
+  const pjm = data.regions['PJM'];
+  const pjmNote = pjm && pjm.trend_pct > 3
+    ? '<p class="text-xs neutral mt-3">PJM demand rising → data center expansion in Virginia → bullish for <strong style="color:#e6edf3;">EQIX, DLR, NVDA, VRT, ETN</strong></p>'
+    : pjm && pjm.trend_pct < -3
+    ? '<p class="text-xs neutral mt-3">PJM demand softening → possible slowdown in Virginia data center activity → watch EQIX, DLR</p>'
+    : '<p class="text-xs neutral mt-3">PJM (Virginia) is the primary data center electricity signal. Rising YoY demand → AI infrastructure buildout.</p>';
+
+  document.getElementById('eia-signal').innerHTML = signals.length
+    ? `<div class="space-y-2">${signals.join('')}${pjmNote}</div>`
+    : '<span class="neutral">Not enough data to generate signals.</span>';
+}
+
+document.getElementById('eia-refresh-btn').addEventListener('click', loadEiaDemand);
+
+// ── GPU Pricing ──────────────────────────────────────────────────────────────
+const GPU_COLORS = {
+  "H100 80GB":  "#e3b341",
+  "A100 80GB":  "#a371f7",
+  "A100 40GB":  "#388bfd",
+  "V100 16GB":  "#3fb950",
+  "A10G 24GB":  "#db6d28",
+};
+
+let gpuChart = null;
+let gpuSeries = {};
+let gpuData = null;
+let activeGpus = new Set();
+let gpuResizeObs = null;
+let gpuLoaded = false;
+
+async function loadGpuPrices() {
+  const btn = document.getElementById('gpu-refresh-btn');
+  btn.textContent = '⟳ Loading…'; btn.disabled = true;
+  document.getElementById('gpu-chart').innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="text-sm neutral">Fetching 90-day AWS spot price history…</span></div>';
+  document.getElementById('gpu-summary').innerHTML = '';
+  document.getElementById('gpu-legend').innerHTML = '';
+  document.getElementById('gpu-signal').innerHTML = '<span class="neutral">Loading…</span>';
+
+  if (gpuChart) { gpuChart.remove(); gpuChart = null; }
+  if (gpuResizeObs) { gpuResizeObs.disconnect(); gpuResizeObs = null; }
+  gpuSeries = {};
+
+  try {
+    const res = await fetch('/api/gpu-prices');
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (!data.gpus || Object.keys(data.gpus).length === 0) throw new Error('No spot price data returned — instance types may not be available as spot in us-east-1 right now.');
+    gpuData = data;
+    renderGpuChart(data);
+    renderGpuSummary(data);
+    renderGpuSignal(data);
+  } catch (err) {
+    document.getElementById('gpu-chart').innerHTML =
+      `<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="negative text-sm">Error: ${err.message}</span></div>`;
+    document.getElementById('gpu-signal').innerHTML = `<span class="negative">${err.message}</span>`;
+  } finally {
+    btn.textContent = '↻ Refresh'; btn.disabled = false;
+  }
+}
+
+function renderGpuChart(data) {
+  activeGpus = new Set(Object.keys(data.gpus));
+  const container = document.getElementById('gpu-chart');
+  container.innerHTML = '';
+
+  // Sort so H100 is on top of legend
+  const gpuOrder = ["H100 80GB", "A100 80GB", "A100 40GB", "V100 16GB", "A10G 24GB"];
+  const sorted = gpuOrder.filter(g => data.gpus[g]).concat(
+    Object.keys(data.gpus).filter(g => !gpuOrder.includes(g))
+  );
+
+  gpuChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 380,
+    layout: { background: { type: 'solid', color: '#0d1117' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScroll: true,
+    handleScale: true,
+  });
+
+  for (const gpu of sorted) {
+    if (!data.gpus[gpu]) continue;
+    const ls = gpuChart.addLineSeries({
+      color: GPU_COLORS[gpu] || '#8b949e',
+      lineWidth: 2,
+      title: gpu,
+      priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
+    });
+    ls.setData(data.gpus[gpu]);
+    gpuSeries[gpu] = ls;
+  }
+
+  gpuChart.timeScale().fitContent();
+  renderGpuLegend();
+
+  gpuResizeObs = new ResizeObserver(entries => {
+    if (gpuChart && entries[0]) gpuChart.resize(entries[0].contentRect.width, 380);
+  });
+  gpuResizeObs.observe(container);
+}
+
+function renderGpuLegend() {
+  if (!gpuData) return;
+  const gpuOrder = ["H100 80GB", "A100 80GB", "A100 40GB", "V100 16GB", "A10G 24GB"];
+  const sorted = gpuOrder.filter(g => gpuData.gpus[g]).concat(
+    Object.keys(gpuData.gpus).filter(g => !gpuOrder.includes(g))
+  );
+  document.getElementById('gpu-legend').innerHTML = sorted.map(gpu => {
+    const series = gpuData.gpus[gpu] || [];
+    const last = series[series.length - 1]?.value ?? 0;
+    const prev = series[series.length - 2]?.value ?? last;
+    const chg = prev ? ((last - prev) / prev * 100) : 0;
+    const isActive = activeGpus.has(gpu);
+    const dot = isActive ? (GPU_COLORS[gpu] || '#8b949e') : '#30363d';
+    const chgCls = chg > 0 ? 'positive' : chg < 0 ? 'negative' : 'neutral';
+    return `
+      <div class="flex items-center gap-1.5 cursor-pointer select-none"
+           onclick="toggleGpu('${gpu}')"
+           style="opacity:${isActive ? 1 : 0.35};transition:opacity .15s;"
+           title="${isActive ? 'Click to hide' : 'Click to show'}">
+        <div style="width:10px;height:10px;border-radius:50%;background:${dot};flex-shrink:0;"></div>
+        <span class="text-xs" style="color:#e6edf3;${isActive ? '' : 'text-decoration:line-through;'}">${gpu}</span>
+        <span class="text-xs font-mono" style="color:#8b949e;">$${last.toFixed(3)}/hr</span>
+        <span class="text-xs font-mono ${chgCls}">${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%</span>
+      </div>`;
+  }).join('');
+}
+
+function toggleGpu(gpu) {
+  const s = gpuSeries[gpu];
+  if (!s) return;
+  if (activeGpus.has(gpu)) { activeGpus.delete(gpu); s.applyOptions({ visible: false }); }
+  else                     { activeGpus.add(gpu);    s.applyOptions({ visible: true });  }
+  renderGpuLegend();
+}
+
+function renderGpuSummary(data) {
+  const gpuOrder = ["H100 80GB", "A100 80GB", "A100 40GB", "V100 16GB", "A10G 24GB"];
+  const sorted = gpuOrder.filter(g => data.gpus[g]).concat(
+    Object.keys(data.gpus).filter(g => !gpuOrder.includes(g))
+  );
+  document.getElementById('gpu-summary').innerHTML = sorted.map(gpu => {
+    const series = data.gpus[gpu] || [];
+    if (!series.length) return '';
+    const last  = series[series.length - 1].value;
+    const first = series[0].value;
+    const chg90 = first ? ((last - first) / first * 100) : 0;
+    const chgCls = chg90 > 0 ? 'positive' : chg90 < 0 ? 'negative' : 'neutral';
+    const color  = GPU_COLORS[gpu] || '#8b949e';
+    return `
+      <div class="metric-card flex-1" style="min-width:130px;border-color:${color}33;">
+        <div class="text-xs mb-1 font-semibold" style="color:${color};">${gpu}</div>
+        <div class="text-lg font-bold" style="color:#e6edf3;">$${last.toFixed(3)}<span class="text-xs font-normal neutral">/hr</span></div>
+        <div class="text-xs mt-0.5 ${chgCls}">90d: ${chg90 >= 0 ? '+' : ''}${chg90.toFixed(1)}%</div>
+      </div>`;
+  }).join('');
+}
+
+function renderGpuSignal(data) {
+  const gpuOrder = ["H100 80GB", "A100 80GB", "A100 40GB"];
+  const signals = [];
+
+  for (const gpu of gpuOrder) {
+    const series = data.gpus[gpu];
+    if (!series || series.length < 14) continue;
+    const recent = series.slice(-7).map(d => d.value);
+    const prior  = series.slice(-14, -7).map(d => d.value);
+    const avgRecent = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const avgPrior  = prior.reduce((a, b) => a + b, 0) / prior.length;
+    const pct = avgPrior ? ((avgRecent - avgPrior) / avgPrior * 100) : 0;
+    const dir = pct > 5 ? '↑ Rising' : pct < -5 ? '↓ Falling' : '→ Stable';
+    const cls = pct > 5 ? 'positive' : pct < -5 ? 'negative' : 'neutral';
+    const color = GPU_COLORS[gpu] || '#8b949e';
+    signals.push(`
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-semibold" style="color:${color};min-width:90px;">${gpu}</span>
+        <span class="text-xs ${cls} font-medium">${dir}</span>
+        <span class="text-xs neutral">(7-day avg ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% vs prior week · $${avgRecent.toFixed(3)}/hr)</span>
+      </div>`);
+  }
+
+  document.getElementById('gpu-signal').innerHTML = signals.length
+    ? `<div class="space-y-2">${signals.join('')}
+         <p class="text-xs neutral mt-3">Rising spot prices → tighter GPU supply → bullish signal for NVDA, AMD, MU, AVGO</p>
+       </div>`
+    : '<span class="neutral">Not enough data to generate signals.</span>';
+}
+
+document.getElementById('gpu-refresh-btn').addEventListener('click', loadGpuPrices);
 
 // ── Init ────────────────────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click', loadData);

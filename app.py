@@ -1,13 +1,20 @@
 from flask import Flask, render_template, request
 import yfinance as yf
 import pandas as pd
+import requests as http_requests
 import time
 import threading
 import math
 import json
 import calendar
+import os
+import boto3
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -28,9 +35,31 @@ _cache_time = 0
 _detail_cache = {}
 _monthly_cache = {}
 _trends_cache = {}
+_gpu_cache = {}
+_eia_cache = {}
 _cache_lock = threading.Lock()
 CACHE_TTL = 300
 DETAIL_TTL = 3600
+
+# ── EIA grid region config ────────────────────────────────────────────────────
+EIA_REGIONS = {
+    "PJM": "PJM (Virginia / Mid-Atlantic)",
+    "CAL": "CAISO (California)",
+    "TEX": "ERCOT (Texas)",
+    "MISO": "MISO (Midwest)",
+}
+
+# ── GPU instance definitions ──────────────────────────────────────────────────
+GPU_INSTANCES = {
+    "p3.2xlarge":    {"gpu": "V100 16GB",  "count": 1},
+    "p3.8xlarge":    {"gpu": "V100 16GB",  "count": 4},
+    "p3.16xlarge":   {"gpu": "V100 16GB",  "count": 8},
+    "p4d.24xlarge":  {"gpu": "A100 40GB",  "count": 8},
+    "p4de.24xlarge": {"gpu": "A100 80GB",  "count": 8},
+    "p5.48xlarge":   {"gpu": "H100 80GB",  "count": 8},
+    "g5.xlarge":     {"gpu": "A10G 24GB",  "count": 1},
+    "g5.12xlarge":   {"gpu": "A10G 24GB",  "count": 4},
+}
 
 CATEGORY_TICKERS = {
     "Semiconductors":         ["MU","000660.KS","005930.KS","GOOGL","NVDA","AMD","AMZN","MSFT","INTC"],
@@ -377,6 +406,181 @@ def get_monthly():
         return safe_json(result)
     except Exception as e:
         return safe_json({"error": str(e), "month": month})
+
+
+# ── GPU spot price history ────────────────────────────────────────────────────
+
+@app.route("/api/gpu-prices")
+def get_gpu_prices():
+    now_t = time.time()
+    with _cache_lock:
+        cached = _gpu_cache.get("prices")
+        if cached and now_t - cached["time"] < 3600:
+            return safe_json(cached["data"])
+
+    try:
+        ec2 = boto3.client(
+            "ec2",
+            region_name="us-east-1",
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        )
+
+        instance_types = list(GPU_INSTANCES.keys())
+        all_prices = []
+        paginator = ec2.get_paginator("describe_spot_price_history")
+        for page in paginator.paginate(
+            InstanceTypes=instance_types,
+            ProductDescriptions=["Linux/UNIX"],
+            StartTime=datetime.utcnow() - timedelta(days=90),
+            EndTime=datetime.utcnow(),
+        ):
+            all_prices.extend(page["SpotPriceHistory"])
+
+        # Daily median $/GPU/hr grouped by GPU model
+        daily: dict = defaultdict(lambda: defaultdict(list))
+        for entry in all_prices:
+            inst = entry["InstanceType"]
+            if inst not in GPU_INSTANCES:
+                continue
+            info = GPU_INSTANCES[inst]
+            gpu_model = info["gpu"]
+            price_per_gpu = float(entry["SpotPrice"]) / info["count"]
+            date = entry["Timestamp"].strftime("%Y-%m-%d")
+            daily[gpu_model][date].append(price_per_gpu)
+
+        result = {}
+        for gpu_model, dates in daily.items():
+            series = []
+            for date in sorted(dates.keys()):
+                vals = dates[date]
+                vals.sort()
+                median = vals[len(vals) // 2]
+                series.append({"time": date, "value": round(median, 4)})
+            if series:
+                result[gpu_model] = series
+
+        data = {"gpus": result, "updated": time.time(), "region": "us-east-1"}
+        with _cache_lock:
+            _gpu_cache["prices"] = {"data": data, "time": time.time()}
+
+        return safe_json(data)
+    except Exception as e:
+        return safe_json({"gpus": {}, "error": str(e)})
+
+
+# ── EIA electricity demand ────────────────────────────────────────────────────
+
+def _eia_fetch_region(api_key, respondent, days):
+    """Return list of raw hourly records from EIA API for one grid region."""
+    end_dt   = datetime.utcnow()
+    start_dt = end_dt - timedelta(days=days)
+    url = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
+    params = {
+        "api_key":             api_key,
+        "data[0]":             "value",
+        "facets[type][]":      "D",
+        "facets[respondent][]": respondent,
+        "frequency":           "hourly",
+        "start":               start_dt.strftime("%Y-%m-%dT%H"),
+        "end":                 end_dt.strftime("%Y-%m-%dT%H"),
+        "sort[0][column]":     "period",
+        "sort[0][direction]":  "asc",
+        "length":              5000,
+        "offset":              0,
+    }
+    records = []
+    while True:
+        r = http_requests.get(url, params=params, timeout=30)
+        r.raise_for_status()
+        body    = r.json()
+        page    = body.get("response", {}).get("data", [])
+        total   = body.get("response", {}).get("total", 0)
+        records.extend(page)
+        if len(records) >= int(total):
+            break
+        params["offset"] = len(records)
+    return records
+
+
+def _eia_to_daily(records):
+    """Aggregate hourly MW demand records to daily averages."""
+    by_date = defaultdict(list)
+    for r in records:
+        period = r.get("period", "")   # "2024-01-15T10"
+        date   = period[:10]           # "2024-01-15"
+        val    = r.get("value")
+        if val is not None:
+            try:
+                by_date[date].append(float(val))
+            except (TypeError, ValueError):
+                pass
+    series = []
+    for date in sorted(by_date):
+        vals = by_date[date]
+        series.append({"time": date, "value": round(sum(vals) / len(vals), 1)})
+    return series
+
+
+def _rolling_avg(series, window=7):
+    out = []
+    for i, pt in enumerate(series):
+        chunk = series[max(0, i - window + 1): i + 1]
+        avg   = sum(p["value"] for p in chunk) / len(chunk)
+        out.append({"time": pt["time"], "value": round(avg, 1)})
+    return out
+
+
+@app.route("/api/eia-demand")
+def get_eia_demand():
+    api_key = os.environ.get("EIA_API_KEY", "").strip()
+    if not api_key:
+        return safe_json({"regions": {}, "error": "EIA_API_KEY not configured"})
+
+    now_t = time.time()
+    with _cache_lock:
+        cached = _eia_cache.get("demand")
+        if cached and now_t - cached["time"] < 21600:   # 6-hour cache
+            return safe_json(cached["data"])
+
+    try:
+        result = {}
+        for respondent, label in EIA_REGIONS.items():
+            records = _eia_fetch_region(api_key, respondent, days=365)
+            daily   = _eia_to_daily(records)
+            smooth  = _rolling_avg(daily, window=7)
+
+            # YoY baseline: same calendar week last year → % deviation
+            yoy_signals = []
+            if len(daily) >= 370:
+                for i in range(364, len(daily)):
+                    curr = daily[i]["value"]
+                    prev = daily[i - 364]["value"]
+                    if prev:
+                        yoy_signals.append(round((curr - prev) / prev * 100, 2))
+
+            # Trend: slope of last 30 days (MWh/day change)
+            trend_pct = None
+            if len(smooth) >= 30:
+                recent  = smooth[-1]["value"]
+                month_ago = smooth[-30]["value"]
+                if month_ago:
+                    trend_pct = round((recent - month_ago) / month_ago * 100, 2)
+
+            result[respondent] = {
+                "label":      label,
+                "smooth":     smooth,
+                "trend_pct":  trend_pct,
+                "latest_mw":  smooth[-1]["value"] if smooth else None,
+                "yoy_avg":    round(sum(yoy_signals) / len(yoy_signals), 2) if yoy_signals else None,
+            }
+
+        data = {"regions": result, "updated": time.time()}
+        with _cache_lock:
+            _eia_cache["demand"] = {"data": data, "time": time.time()}
+        return safe_json(data)
+    except Exception as e:
+        return safe_json({"regions": {}, "error": str(e)})
 
 
 # ── serve frontend ────────────────────────────────────────────────────────────
