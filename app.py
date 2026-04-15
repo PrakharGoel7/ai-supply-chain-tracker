@@ -1,11 +1,13 @@
 from flask import Flask, render_template, request
 import yfinance as yf
+import pandas as pd
 import time
 import threading
 import math
 import json
+import calendar
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -24,9 +26,21 @@ TICKERS = [
 _cache = {}
 _cache_time = 0
 _detail_cache = {}
+_monthly_cache = {}
+_trends_cache = {}
 _cache_lock = threading.Lock()
 CACHE_TTL = 300
 DETAIL_TTL = 3600
+
+CATEGORY_TICKERS = {
+    "Semiconductors":         ["MU","000660.KS","005930.KS","GOOGL","NVDA","AMD","AMZN","MSFT","INTC"],
+    "IT Infrastructure":      ["DELL","HPE","AVGO","MRVL","CSCO","ANET","NVDA","PSTG","NTAP"],
+    "Compute":                ["AMZN","MSFT","ORCL","GOOGL"],
+    "Developers & Operators": ["EQIX","DLR"],
+    "Data Centers":           ["MSFT","GOOGL","AMZN","META","ORCL"],
+    "Energy":                 ["FSLR","GEV","NEE","ENPH","XOM","CVX","TSLA"],
+    "Industrial Equipment":   ["VRT","SU.PA","ABBN.SW","ETN","SIE.DE","GEV"],
+}
 
 PERIOD_MAP = {
     "1D": ("1d",  "15m"),
@@ -244,6 +258,125 @@ def get_details():
         return safe_json(result)
     except Exception as e:
         return safe_json({"metrics": {}, "news": [], "error": str(e)})
+
+
+# ── category trends ───────────────────────────────────────────────────────────
+
+@app.route("/api/category-trends")
+def get_category_trends():
+    period = request.args.get("period", "2y")
+
+    now = time.time()
+    with _cache_lock:
+        cached = _trends_cache.get(period)
+        if cached and now - cached["time"] < 3600:
+            return safe_json(cached["data"])
+
+    try:
+        raw = yf.download(
+            " ".join(TICKERS),
+            period=period,
+            interval="1mo",
+            progress=False,
+            auto_adjust=True,
+        )
+        closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+
+        # Index each ticker to its first available price → % change since period start
+        first_prices = closes.bfill().iloc[0]
+        cumulative = (closes.divide(first_prices) - 1) * 100
+
+        result = {}
+        for cat, cat_tickers in CATEGORY_TICKERS.items():
+            valid = [t for t in cat_tickers if t in cumulative.columns]
+            if not valid:
+                continue
+            avg = cumulative[valid].mean(axis=1)
+            series = []
+            for dt, val in avg.items():
+                if not (isinstance(val, float) and math.isnan(val)):
+                    series.append({
+                        "time": f"{dt.year}-{dt.month:02d}-01",
+                        "value": round(float(val), 2),
+                    })
+            if series:
+                result[cat] = series
+
+        data = {"categories": result, "period": period}
+        with _cache_lock:
+            _trends_cache[period] = {"data": data, "time": time.time()}
+        return safe_json(data)
+    except Exception as e:
+        return safe_json({"categories": {}, "error": str(e)})
+
+
+# ── monthly performance ───────────────────────────────────────────────────────
+
+@app.route("/api/monthly")
+def get_monthly():
+    month = request.args.get("month", "")
+    if not month or len(month) != 7:
+        return safe_json({"error": "Use format YYYY-MM"})
+
+    now = time.time()
+    current_month = datetime.now().strftime("%Y-%m")
+    cache_ttl = 300 if month >= current_month else 86400  # past months cached 24h
+
+    with _cache_lock:
+        cached = _monthly_cache.get(month)
+        if cached and now - cached["time"] < cache_ttl:
+            return safe_json(cached["data"])
+
+    try:
+        year, mon = int(month[:4]), int(month[5:7])
+        start = f"{year}-{mon:02d}-01"
+        last_day = calendar.monthrange(year, mon)[1]
+        end = (datetime(year, mon, last_day) + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        raw = yf.download(
+            " ".join(TICKERS),
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=True,
+        )
+
+        closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+
+        results = []
+        for ticker in TICKERS:
+            try:
+                if ticker not in closes.columns:
+                    continue
+                series = closes[ticker].dropna()
+                if len(series) < 2:
+                    continue
+                s = float(series.iloc[0])
+                e = float(series.iloc[-1])
+                if s > 0 and not math.isnan(s) and not math.isnan(e):
+                    results.append({
+                        "ticker": ticker,
+                        "change": round((e - s) / s * 100, 2),
+                        "start_price": round(s, 2),
+                        "end_price": round(e, 2),
+                    })
+            except Exception:
+                continue
+
+        results.sort(key=lambda x: x["change"], reverse=True)
+
+        result = {
+            "month": month,
+            "top5": results[:5],
+            "bottom5": list(reversed(results[-5:])) if len(results) >= 5 else list(reversed(results)),
+            "total": len(results),
+        }
+        with _cache_lock:
+            _monthly_cache[month] = {"data": result, "time": time.time()}
+
+        return safe_json(result)
+    except Exception as e:
+        return safe_json({"error": str(e), "month": month})
 
 
 # ── serve frontend ────────────────────────────────────────────────────────────

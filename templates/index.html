@@ -22,6 +22,12 @@
     .metric-card { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:10px 14px; }
     .news-item { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:12px; display:block; text-decoration:none; transition:border-color .15s; }
     .news-item:hover { border-color:#388bfd; }
+    .tab-btn { padding:8px 18px; font-size:.875rem; background:transparent; border:none; cursor:pointer; color:#8b949e; border-bottom:2px solid transparent; transition:all .15s; }
+    .tab-btn.active { color:#e6edf3; border-bottom-color:#388bfd; }
+    .tab-btn:hover:not(.active) { color:#c9d1d9; }
+    input[type="month"] { background:#161b22; border:1px solid #30363d; border-radius:8px; color:#e6edf3; padding:8px 12px; font-size:.9rem; outline:none; }
+    input[type="month"]:focus { border-color:#388bfd; }
+    input[type="month"]::-webkit-calendar-picker-indicator { filter:invert(.6); cursor:pointer; }
     ::-webkit-scrollbar { width:6px; }
     ::-webkit-scrollbar-track { background:#0d1117; }
     ::-webkit-scrollbar-thumb { background:#30363d; border-radius:3px; }
@@ -45,12 +51,70 @@
   </div>
 </header>
 
-<!-- ── Dashboard ────────────────────────────────────────────────────────── -->
-<main class="max-w-screen-xl mx-auto px-6 py-8 space-y-8" id="dashboard">
-  <div class="flex items-center justify-center h-64">
-    <p class="text-sm neutral">Loading stock data… (first load ~10s)</p>
+<!-- ── Tab bar ────────────────────────────────────────────────────────────── -->
+<div style="background:#161b22;border-bottom:1px solid #30363d;">
+  <div class="max-w-screen-xl mx-auto px-6 flex">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="monthly">Monthly Top 5</button>
+    <button class="tab-btn" data-tab="trends">Category Trends</button>
   </div>
-</main>
+</div>
+
+<!-- ── Dashboard tab ─────────────────────────────────────────────────────── -->
+<div id="tab-dashboard">
+  <main class="max-w-screen-xl mx-auto px-6 py-8 space-y-8" id="dashboard">
+    <div class="flex items-center justify-center h-64">
+      <p class="text-sm neutral">Loading stock data… (first load ~10s)</p>
+    </div>
+  </main>
+</div>
+
+<!-- ── Monthly tab ───────────────────────────────────────────────────────── -->
+<div id="tab-monthly" style="display:none;">
+  <main class="max-w-screen-xl mx-auto px-6 py-10">
+
+    <!-- Picker -->
+    <div class="flex items-center gap-3 mb-8 flex-wrap">
+      <input type="month" id="month-picker" />
+      <button id="month-go"
+        class="px-5 py-2 rounded-lg text-sm font-medium transition"
+        style="background:#238636;color:#fff;border:1px solid #2ea043;"
+        onmouseover="this.style.background='#2ea043'" onmouseout="this.style.background='#238636'">
+        Show Results
+      </button>
+      <span class="text-xs neutral" id="month-status"></span>
+    </div>
+
+    <!-- Results -->
+    <div id="monthly-results"></div>
+
+  </main>
+</div>
+
+<!-- ── Category Trends tab ───────────────────────────────────────────────── -->
+<div id="tab-trends" style="display:none;">
+  <main class="max-w-screen-xl mx-auto px-6 py-8">
+    <section class="card rounded-xl overflow-hidden">
+      <div class="px-5 py-3 flex items-center justify-between" style="border-bottom:1px solid #30363d;">
+        <div class="flex items-center gap-3">
+          <span class="category-badge" style="background:#1a1a2a;color:#388bfd;border:1px solid #388bfd44;">Category Trends</span>
+          <span class="text-xs neutral">% change since start of period · all categories indexed to 0% at start</span>
+        </div>
+        <div class="flex gap-1" id="trends-period-selector">
+          <button class="period-btn" data-period="1y">1Y</button>
+          <button class="period-btn active" data-period="2y">2Y</button>
+          <button class="period-btn" data-period="3y">3Y</button>
+        </div>
+      </div>
+      <div class="p-5">
+        <div id="trends-chart" style="height:420px;border-radius:6px;overflow:hidden;"></div>
+      </div>
+      <div class="px-5 pb-5">
+        <div id="trends-legend" class="flex flex-wrap gap-x-5 gap-y-2"></div>
+      </div>
+    </section>
+  </main>
+</div>
 
 <!-- ── Drawer backdrop ───────────────────────────────────────────────────── -->
 <div id="drawer-backdrop"
@@ -561,6 +625,240 @@ document.getElementById('period-selector').addEventListener('click', e => {
   currentPeriod = btn.dataset.period;
   loadChart(currentTicker, currentPeriod);
 });
+
+// ── Category colors (shared with backend CATEGORY_TICKERS) ───────────────────
+const CAT_COLORS = {
+  "Semiconductors":         "#238636",
+  "IT Infrastructure":      "#388bfd",
+  "Compute":                "#a371f7",
+  "Developers & Operators": "#db6d28",
+  "Data Centers":           "#1f6feb",
+  "Energy":                 "#e3b341",
+  "Industrial Equipment":   "#8b949e",
+};
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+let trendsLoaded = false;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.getElementById('tab-dashboard').style.display = name === 'dashboard' ? '' : 'none';
+  document.getElementById('tab-monthly').style.display   = name === 'monthly'   ? '' : 'none';
+  document.getElementById('tab-trends').style.display    = name === 'trends'    ? '' : 'none';
+  if (name === 'trends') {
+    if (!trendsLoaded) { trendsLoaded = true; loadTrends('2y'); }
+    else if (trendsChart) {
+      const c = document.getElementById('trends-chart');
+      trendsChart.resize(c.clientWidth, 420);
+      trendsChart.timeScale().fitContent();
+    }
+  }
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+
+// ── Category Trends ──────────────────────────────────────────────────────────
+let trendsChart = null;
+let trendsSeries = {};
+let trendsData = null;
+let activeCategories = new Set();
+let trendsResizeObs = null;
+
+async function loadTrends(period) {
+  document.querySelectorAll('#trends-period-selector .period-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.period === period));
+
+  const container = document.getElementById('trends-chart');
+  container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="text-sm neutral">Loading…</span></div>';
+  document.getElementById('trends-legend').innerHTML = '';
+
+  if (trendsChart) { trendsChart.remove(); trendsChart = null; }
+  if (trendsResizeObs) { trendsResizeObs.disconnect(); trendsResizeObs = null; }
+  trendsSeries = {};
+
+  try {
+    const res  = await fetch(`/api/category-trends?period=${period}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderTrends(data);
+  } catch (err) {
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="negative text-sm">Failed: ${err.message}</span></div>`;
+  }
+}
+
+function renderTrends(data) {
+  trendsData = data;
+  activeCategories = new Set(Object.keys(data.categories));
+
+  const container = document.getElementById('trends-chart');
+  container.innerHTML = '';
+
+  trendsChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 420,
+    layout: { background: { type: 'solid', color: '#0d1117' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScroll: true,
+    handleScale: true,
+  });
+
+  let firstSeries = null;
+  for (const [cat, series] of Object.entries(data.categories)) {
+    if (!series.length) continue;
+    const ls = trendsChart.addLineSeries({
+      color: CAT_COLORS[cat] || '#8b949e',
+      lineWidth: 2,
+      title: cat,
+      priceFormat: { type: 'price', precision: 1, minMove: 0.1 },
+    });
+    ls.setData(series);
+    trendsSeries[cat] = ls;
+    if (!firstSeries) firstSeries = ls;
+  }
+
+  if (firstSeries) {
+    firstSeries.createPriceLine({
+      price: 0, color: '#444d56', lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true, title: '0 %',
+    });
+  }
+
+  trendsChart.timeScale().fitContent();
+  renderTrendsLegend();
+
+  trendsResizeObs = new ResizeObserver(entries => {
+    if (trendsChart && entries[0]) trendsChart.resize(entries[0].contentRect.width, 420);
+  });
+  trendsResizeObs.observe(container);
+}
+
+function renderTrendsLegend() {
+  if (!trendsData) return;
+  document.getElementById('trends-legend').innerHTML = Object.entries(trendsData.categories)
+    .map(([cat, series]) => {
+      const val     = series[series.length - 1]?.value ?? 0;
+      const isActive = activeCategories.has(cat);
+      const dot     = isActive ? (CAT_COLORS[cat] || '#8b949e') : '#30363d';
+      const valCls  = isActive ? (val >= 0 ? 'positive' : 'negative') : 'neutral';
+      return `
+        <div class="flex items-center gap-1.5 cursor-pointer select-none"
+             onclick="toggleCategory('${cat.replace(/'/g, "\\'")}')"
+             style="opacity:${isActive ? 1 : 0.35};transition:opacity .15s;"
+             title="${isActive ? 'Click to hide' : 'Click to show'}">
+          <div style="width:10px;height:10px;border-radius:50%;background:${dot};flex-shrink:0;"></div>
+          <span class="text-xs" style="color:#e6edf3;${isActive ? '' : 'text-decoration:line-through;'}">${cat}</span>
+          <span class="text-xs font-mono ${valCls}">${val >= 0 ? '+' : ''}${val.toFixed(1)}%</span>
+        </div>`;
+    }).join('');
+}
+
+function toggleCategory(cat) {
+  const series = trendsSeries[cat];
+  if (!series) return;
+  if (activeCategories.has(cat)) {
+    activeCategories.delete(cat);
+    series.applyOptions({ visible: false });
+  } else {
+    activeCategories.add(cat);
+    series.applyOptions({ visible: true });
+  }
+  renderTrendsLegend();
+}
+
+document.getElementById('trends-period-selector').addEventListener('click', e => {
+  const btn = e.target.closest('.period-btn');
+  if (btn) loadTrends(btn.dataset.period);
+});
+
+// ── Company name lookup ───────────────────────────────────────────────────────
+function getCompanyName(ticker) {
+  for (const val of Object.values(STRUCTURE)) {
+    const stocks = Array.isArray(val) ? val : Object.values(val).flat();
+    const match = stocks.find(s => s.ticker === ticker);
+    if (match) return match.name;
+  }
+  return ticker;
+}
+
+// ── Monthly Top 5 ────────────────────────────────────────────────────────────
+function renderMonthly(data) {
+  const monthLabel = new Date(data.month + '-15').toLocaleDateString('en-US', { month:'long', year:'numeric' });
+  const RANK_COLORS = ['#e3b341','#8b949e','#cd7f32'];
+
+  function card(s, rank, isTop) {
+    const name  = getCompanyName(s.ticker);
+    const color = isTop ? (RANK_COLORS[rank - 1] || '#6e7681') : '#f85149';
+    const cls   = s.change >= 0 ? 'positive' : 'negative';
+    const arrow = s.change >= 0 ? '▲' : '▼';
+    return `
+      <div class="flex items-center gap-4 p-4 rounded-xl mb-3"
+           style="background:#161b22;border:1px solid #30363d;">
+        <div class="text-xl font-bold flex-shrink-0" style="color:${color};width:34px;">#${rank}</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-white truncate">${name}</div>
+          <div class="text-xs neutral">${s.ticker}</div>
+        </div>
+        <div class="text-right flex-shrink-0">
+          <div class="text-lg font-bold ${cls}">${arrow} ${Math.abs(s.change).toFixed(2)}%</div>
+          <div class="text-xs neutral">${s.start_price.toFixed(2)} → ${s.end_price.toFixed(2)}</div>
+        </div>
+      </div>`;
+  }
+
+  const topHtml    = data.top5.map((s, i)    => card(s, i + 1, true)).join('');
+  const bottomHtml = data.bottom5.map((s, i) => card(s, i + 1, false)).join('');
+
+  document.getElementById('monthly-results').innerHTML = `
+    <h2 class="text-xl font-bold text-white mb-6">${monthLabel}
+      <span class="text-sm font-normal neutral ml-2">${data.total} stocks tracked</span>
+    </h2>
+    <div class="grid gap-8" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));">
+      <div>
+        <div class="text-xs font-semibold positive mb-3" style="text-transform:uppercase;letter-spacing:.06em;">Top 5 Performers</div>
+        ${topHtml}
+      </div>
+      <div>
+        <div class="text-xs font-semibold negative mb-3" style="text-transform:uppercase;letter-spacing:.06em;">Worst 5 Performers</div>
+        ${bottomHtml}
+      </div>
+    </div>`;
+}
+
+async function loadMonthly() {
+  const month = document.getElementById('month-picker').value;
+  if (!month) return;
+  const status = document.getElementById('month-status');
+  const results = document.getElementById('monthly-results');
+  status.textContent = 'Fetching…';
+  results.innerHTML = `<div class="flex justify-center py-16"><p class="text-sm neutral">Loading data for ${month}…</p></div>`;
+  try {
+    const res  = await fetch(`/api/monthly?month=${month}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderMonthly(data);
+    status.textContent = '';
+  } catch (err) {
+    results.innerHTML = `<p class="text-sm negative text-center py-12">Error: ${err.message}</p>`;
+    status.textContent = '';
+  }
+}
+
+document.getElementById('month-go').addEventListener('click', loadMonthly);
+document.getElementById('month-picker').addEventListener('keydown', e => { if (e.key === 'Enter') loadMonthly(); });
+
+// Set default month to last month, max to current month
+(() => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 1);
+  const val = d.toISOString().slice(0, 7);
+  const picker = document.getElementById('month-picker');
+  picker.value = val;
+  picker.max   = new Date().toISOString().slice(0, 7);
+  picker.min   = '2020-01';
+})();
 
 // ── Init ────────────────────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click', loadData);
