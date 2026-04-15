@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Supply Chain Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    body { background:#0d1117; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+    .card  { background:#161b22; border:1px solid #30363d; }
+    .subcard { background:#0d1117; border:1px solid #21262d; }
+    .positive { color:#3fb950; }
+    .negative { color:#f85149; }
+    .neutral  { color:#8b949e; }
+    th { color:#8b949e; font-weight:500; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; }
+    td { font-size:.85rem; }
+    .stock-row:hover td { background:#1c2128; cursor:pointer; }
+    .category-badge { font-size:.65rem; padding:2px 7px; border-radius:999px; font-weight:600; letter-spacing:.04em; }
+    .period-btn { padding:3px 10px; font-size:.78rem; border-radius:6px; color:#8b949e; background:transparent; border:1px solid transparent; cursor:pointer; transition:all .15s; }
+    .period-btn:hover, .period-btn.active { background:#21262d; color:#e6edf3; border-color:#30363d; }
+    .metric-card { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:10px 14px; }
+    .news-item { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:12px; display:block; text-decoration:none; transition:border-color .15s; }
+    .news-item:hover { border-color:#388bfd; }
+    ::-webkit-scrollbar { width:6px; }
+    ::-webkit-scrollbar-track { background:#0d1117; }
+    ::-webkit-scrollbar-thumb { background:#30363d; border-radius:3px; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<!-- ── Header ───────────────────────────────────────────────────────────── -->
+<header style="background:#161b22;border-bottom:1px solid #30363d;" class="sticky top-0 z-20">
+  <div class="max-w-screen-xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <h1 class="text-lg font-bold text-white tracking-tight">AI Supply Chain Tracker</h1>
+      <p class="text-xs neutral" id="last-updated">Fetching data…</p>
+    </div>
+    <button id="refresh-btn"
+      class="text-sm px-4 py-1.5 rounded-md font-medium"
+      style="background:#238636;color:#fff;border:1px solid #2ea043;"
+      onmouseover="this.style.background='#2ea043'" onmouseout="this.style.background='#238636'">
+      ↻ Refresh
+    </button>
+  </div>
+</header>
+
+<!-- ── Dashboard ────────────────────────────────────────────────────────── -->
+<main class="max-w-screen-xl mx-auto px-6 py-8 space-y-8" id="dashboard">
+  <div class="flex items-center justify-center h-64">
+    <p class="text-sm neutral">Loading stock data… (first load ~10s)</p>
+  </div>
+</main>
+
+<!-- ── Drawer backdrop ───────────────────────────────────────────────────── -->
+<div id="drawer-backdrop"
+     class="fixed inset-0 z-30 hidden"
+     style="background:rgba(0,0,0,.55);"
+     onclick="closeDrawer()"></div>
+
+<!-- ── Stock detail drawer ──────────────────────────────────────────────── -->
+<div id="stock-drawer"
+     class="fixed right-0 top-0 h-full z-40 overflow-y-auto"
+     style="width:min(700px,100vw);background:#0d1117;border-left:1px solid #30363d;transform:translateX(100%);transition:transform .28s ease;">
+
+  <!-- Drawer header -->
+  <div class="sticky top-0 z-10 px-6 py-4 flex items-start justify-between"
+       style="background:#161b22;border-bottom:1px solid #30363d;">
+    <div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <h2 id="d-name" class="text-xl font-bold text-white"></h2>
+        <span id="d-ticker" class="text-xs px-2 py-0.5 rounded font-mono" style="background:#21262d;color:#8b949e;"></span>
+        <span id="d-sector" class="text-xs px-2 py-0.5 rounded" style="background:#1f2a1a;color:#3fb950;display:none;"></span>
+      </div>
+      <div class="flex items-center gap-3 mt-1.5">
+        <span id="d-price" class="text-2xl font-bold text-white"></span>
+        <span id="d-change" class="text-sm font-semibold px-2 py-0.5 rounded"></span>
+        <span id="d-currency" class="text-xs neutral"></span>
+      </div>
+    </div>
+    <button onclick="closeDrawer()"
+      class="text-xl p-1 rounded-lg transition"
+      style="color:#8b949e;"
+      onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">✕</button>
+  </div>
+
+  <!-- Period selector + chart -->
+  <div class="px-6 pt-4 pb-2">
+    <div class="flex gap-1 mb-3" id="period-selector">
+      <button class="period-btn" data-period="1D">1D</button>
+      <button class="period-btn" data-period="5D">5D</button>
+      <button class="period-btn active" data-period="1M">1M</button>
+      <button class="period-btn" data-period="3M">3M</button>
+      <button class="period-btn" data-period="1Y">1Y</button>
+    </div>
+    <div id="chart-container" style="height:280px;width:100%;border-radius:8px;overflow:hidden;"></div>
+  </div>
+
+  <!-- 52-week range -->
+  <div class="px-6 py-3" id="d-range"></div>
+
+  <!-- Metrics grid -->
+  <div class="px-6 pb-4" id="d-metrics"></div>
+
+  <!-- News -->
+  <div class="px-6 pb-8">
+    <h3 class="text-xs font-semibold mb-3" style="color:#8b949e;text-transform:uppercase;letter-spacing:.06em;">Recent News</h3>
+    <div id="d-news"></div>
+  </div>
+</div>
+
+<script>
+// ── Stock structure ─────────────────────────────────────────────────────────
+const STRUCTURE = {
+  "Semiconductors": {
+    "Memory": [
+      { name:"Micron",   ticker:"MU" },
+      { name:"SK Hynix", ticker:"000660.KS" },
+      { name:"Samsung",  ticker:"005930.KS" }
+    ],
+    "GPUs & ASICs": [
+      { name:"Alphabet / Google", ticker:"GOOGL" },
+      { name:"NVIDIA",            ticker:"NVDA"  },
+      { name:"AMD",               ticker:"AMD"   },
+      { name:"Amazon / AWS",      ticker:"AMZN"  },
+      { name:"Microsoft",         ticker:"MSFT"  }
+    ],
+    "CPUs": [
+      { name:"AMD",     ticker:"AMD"  },
+      { name:"Intel",   ticker:"INTC" },
+      { name:"NVIDIA",  ticker:"NVDA" }
+    ]
+  },
+  "IT Infrastructure": {
+    "Servers": [
+      { name:"Dell Technologies",         ticker:"DELL" },
+      { name:"Hewlett Packard Enterprise", ticker:"HPE"  }
+    ],
+    "Networking": [
+      { name:"Broadcom",        ticker:"AVGO" },
+      { name:"Marvell",         ticker:"MRVL" },
+      { name:"Cisco",           ticker:"CSCO" },
+      { name:"Arista Networks", ticker:"ANET" },
+      { name:"NVIDIA",          ticker:"NVDA" }
+    ],
+    "Storage": [
+      { name:"Dell Technologies",         ticker:"DELL" },
+      { name:"Pure Storage",              ticker:"PSTG" },
+      { name:"NetApp",                    ticker:"NTAP" },
+      { name:"Hewlett Packard Enterprise", ticker:"HPE"  }
+    ]
+  },
+  "Compute": {
+    "Hyperscalers": [
+      { name:"Amazon",    ticker:"AMZN" },
+      { name:"Microsoft", ticker:"MSFT" },
+      { name:"Oracle",    ticker:"ORCL" },
+      { name:"Alphabet",  ticker:"GOOGL"}
+    ]
+  },
+  "Developers & Operators": [
+    { name:"Equinix",       ticker:"EQIX" },
+    { name:"Digital Realty",ticker:"DLR"  }
+  ],
+  "Data Centers": [
+    { name:"Microsoft", ticker:"MSFT" },
+    { name:"Alphabet",  ticker:"GOOGL"},
+    { name:"Amazon",    ticker:"AMZN" },
+    { name:"Meta",      ticker:"META" },
+    { name:"Oracle",    ticker:"ORCL" }
+  ],
+  "Energy": {
+    "Renewables": [
+      { name:"First Solar",    ticker:"FSLR" },
+      { name:"GE Vernova",     ticker:"GEV"  },
+      { name:"NextEra Energy", ticker:"NEE"  },
+      { name:"Enphase",        ticker:"ENPH" }
+    ],
+    "Oil & Natural Gas": [
+      { name:"ExxonMobil", ticker:"XOM" },
+      { name:"Chevron",    ticker:"CVX" }
+    ],
+    "Batteries": [
+      { name:"Tesla", ticker:"TSLA" }
+    ]
+  },
+  "Industrial Equipment": {
+    "Electrical Equipment": [
+      { name:"Vertiv",             ticker:"VRT"     },
+      { name:"Schneider Electric", ticker:"SU.PA"   },
+      { name:"ABB",                ticker:"ABBN.SW" },
+      { name:"Eaton",              ticker:"ETN"     },
+      { name:"Siemens",            ticker:"SIE.DE"  },
+      { name:"GE Vernova",         ticker:"GEV"     }
+    ],
+    "Cooling": [
+      { name:"Vertiv",             ticker:"VRT"   },
+      { name:"Schneider Electric", ticker:"SU.PA" }
+    ]
+  }
+};
+
+const COLORS = {
+  "Semiconductors":         { border:"#238636", badge:"#238636" },
+  "IT Infrastructure":      { border:"#388bfd", badge:"#388bfd" },
+  "Compute":                { border:"#a371f7", badge:"#a371f7" },
+  "Developers & Operators": { border:"#db6d28", badge:"#db6d28" },
+  "Data Centers":           { border:"#1f6feb", badge:"#1f6feb" },
+  "Energy":                 { border:"#e3b341", badge:"#e3b341" },
+  "Industrial Equipment":   { border:"#8b949e", badge:"#8b949e" }
+};
+
+// ── Format helpers ──────────────────────────────────────────────────────────
+function fmtPct(val) {
+  if (val === null || val === undefined) return '<span class="neutral">—</span>';
+  const cls = val > 0 ? 'positive' : val < 0 ? 'negative' : 'neutral';
+  const arrow = val > 0 ? '▲' : val < 0 ? '▼' : '';
+  return `<span class="${cls}">${arrow} ${Math.abs(val).toFixed(2)}%</span>`;
+}
+function fmtPE(val) {
+  if (val === null || val === undefined) return '<span class="neutral">—</span>';
+  const cls = val < 0 ? 'negative' : '';
+  return `<span class="${cls}">${val.toFixed(1)}×</span>`;
+}
+function fmtPrice(val) {
+  if (val === null || val === undefined) return '<span class="neutral">—</span>';
+  return val.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function fmtMarketCap(v) {
+  if (!v) return '—';
+  if (v >= 1e12) return '$' + (v/1e12).toFixed(2) + 'T';
+  if (v >= 1e9)  return '$' + (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6)  return '$' + (v/1e6).toFixed(2) + 'M';
+  return '$' + v.toLocaleString();
+}
+function fmtVol(v) {
+  if (!v) return '—';
+  if (v >= 1e9) return (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6) return (v/1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return (v/1e3).toFixed(0) + 'K';
+  return v.toLocaleString();
+}
+function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now()/1000 - ts;
+  if (diff < 60)     return 'just now';
+  if (diff < 3600)   return Math.floor(diff/60)   + 'm ago';
+  if (diff < 86400)  return Math.floor(diff/3600)  + 'h ago';
+  if (diff < 604800) return Math.floor(diff/86400) + 'd ago';
+  return new Date(ts*1000).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+}
+
+// ── Table builder ───────────────────────────────────────────────────────────
+function buildTable(stocks, stockData) {
+  const rows = stocks.map(s => {
+    const d = stockData[s.ticker] || {};
+    const safeName = s.name.replace(/'/g, "\\'");
+    const safeTicker = s.ticker.replace(/'/g, "\\'");
+    return `
+      <tr class="stock-row border-b" style="border-color:#21262d;"
+          onclick="showStock('${safeTicker}','${safeName}')">
+        <td class="py-2.5 pr-4 font-medium" style="color:#e6edf3;">${s.name}</td>
+        <td class="py-2.5 pr-4">
+          <span class="font-mono text-xs px-2 py-0.5 rounded" style="background:#21262d;color:#8b949e;">${s.ticker}</span>
+        </td>
+        <td class="py-2.5 pr-4 text-right font-mono">${fmtPrice(d.price)}</td>
+        <td class="py-2.5 pr-4 text-right font-mono">${fmtPE(d.pe_ratio)}</td>
+        <td class="py-2.5 pr-4 text-right font-mono font-medium">${fmtPct(d.daily_change)}</td>
+        <td class="py-2.5 text-right font-mono font-medium">${fmtPct(d.weekly_change)}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full border-collapse">
+        <thead>
+          <tr class="border-b" style="border-color:#30363d;">
+            <th class="text-left py-2 pr-4">Company</th>
+            <th class="text-left py-2 pr-4">Ticker</th>
+            <th class="text-right py-2 pr-4">Price</th>
+            <th class="text-right py-2 pr-4">P/E</th>
+            <th class="text-right py-2 pr-4">Day Chg</th>
+            <th class="text-right py-2">5-Day Chg</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderDashboard(stockData) {
+  let html = '';
+  for (const [catName, catValue] of Object.entries(STRUCTURE)) {
+    const col = COLORS[catName] || { border:'#30363d', badge:'#30363d' };
+    const isFlat = Array.isArray(catValue);
+    let inner = '';
+    if (isFlat) {
+      inner = buildTable(catValue, stockData);
+    } else {
+      for (const [subName, stocks] of Object.entries(catValue)) {
+        if (!stocks.length) continue;
+        inner += `
+          <div class="subcard rounded-lg p-4 mb-3">
+            <h3 class="text-xs font-semibold mb-3" style="color:#8b949e;text-transform:uppercase;letter-spacing:.06em;">${subName}</h3>
+            ${buildTable(stocks, stockData)}
+          </div>`;
+      }
+    }
+    html += `
+      <section class="card rounded-xl overflow-hidden" style="border-color:${col.border}40;">
+        <div class="px-5 py-3 flex items-center gap-3" style="border-bottom:1px solid ${col.border}40;">
+          <span class="category-badge" style="background:${col.badge}22;color:${col.badge};border:1px solid ${col.badge}44;">${catName}</span>
+        </div>
+        <div class="p-5">${inner}</div>
+      </section>`;
+  }
+  document.getElementById('dashboard').innerHTML = html;
+}
+
+// ── Main data loader ────────────────────────────────────────────────────────
+let isLoading = false;
+async function loadData() {
+  if (isLoading) return;
+  isLoading = true;
+  const btn = document.getElementById('refresh-btn');
+  btn.textContent = '⟳ Loading…'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/stocks');
+    const json = await res.json();
+    renderDashboard(json.stocks);
+    const dt = new Date(json.last_updated * 1000);
+    document.getElementById('last-updated').textContent =
+      `Last updated: ${dt.toLocaleTimeString()}${json.cached ? ' (cached)' : ''}`;
+  } catch (err) {
+    document.getElementById('dashboard').innerHTML =
+      `<div class="text-center py-16 negative">Failed to load data. Is the Flask server running?</div>`;
+  } finally {
+    isLoading = false; btn.textContent = '↻ Refresh'; btn.disabled = false;
+  }
+}
+
+// ── Drawer state ────────────────────────────────────────────────────────────
+let activeChart = null;
+let currentTicker = null;
+let currentPeriod = '1M';
+let resizeObserver = null;
+
+function openDrawer() {
+  document.getElementById('drawer-backdrop').classList.remove('hidden');
+  document.getElementById('stock-drawer').style.transform = 'translateX(0)';
+}
+function closeDrawer() {
+  document.getElementById('stock-drawer').style.transform = 'translateX(100%)';
+  setTimeout(() => document.getElementById('drawer-backdrop').classList.add('hidden'), 300);
+  if (activeChart) { activeChart.remove(); activeChart = null; }
+  if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+  currentTicker = null;
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+// ── Show stock detail ───────────────────────────────────────────────────────
+async function showStock(ticker, name) {
+  currentTicker = ticker;
+  currentPeriod = '1M';
+
+  // Reset period buttons
+  document.querySelectorAll('.period-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.period === '1M'));
+
+  // Set header placeholder
+  document.getElementById('d-name').textContent = name;
+  document.getElementById('d-ticker').textContent = ticker;
+  document.getElementById('d-price').textContent = '—';
+  document.getElementById('d-change').textContent = '';
+  document.getElementById('d-change').style.cssText = '';
+  document.getElementById('d-currency').textContent = '';
+  document.getElementById('d-sector').style.display = 'none';
+  document.getElementById('d-range').innerHTML = '';
+  document.getElementById('d-metrics').innerHTML = '<p class="text-sm neutral">Loading metrics…</p>';
+  document.getElementById('d-news').innerHTML = '<p class="text-sm neutral">Loading news…</p>';
+  document.getElementById('chart-container').innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="text-sm neutral">Loading chart…</span></div>';
+
+  openDrawer();
+
+  // Fetch details and chart in parallel
+  await Promise.all([
+    loadDetails(ticker),
+    loadChart(ticker, '1M'),
+  ]);
+}
+
+// ── Chart loader ────────────────────────────────────────────────────────────
+async function loadChart(ticker, period) {
+  const container = document.getElementById('chart-container');
+  container.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="text-sm neutral">Loading chart…</span></div>';
+
+  document.querySelectorAll('.period-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.period === period));
+
+  if (activeChart) { activeChart.remove(); activeChart = null; }
+  if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+
+  try {
+    const res = await fetch(`/api/stock/chart?ticker=${encodeURIComponent(ticker)}&period=${period}`);
+    const data = await res.json();
+
+    if (!data.candles || data.candles.length === 0) {
+      container.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="neutral text-sm">No chart data available</span></div>';
+      return;
+    }
+
+    container.innerHTML = '';
+
+    activeChart = LightweightCharts.createChart(container, {
+      width: container.clientWidth,
+      height: 280,
+      layout: {
+        background: { type: 'solid', color: '#0d1117' },
+        textColor: '#8b949e',
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: '#1c2128' },
+        horzLines: { color: '#1c2128' },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: '#30363d' },
+      timeScale: { borderColor: '#30363d', timeVisible: data.intraday, secondsVisible: false },
+      handleScroll: true,
+      handleScale: true,
+    });
+
+    const candleSeries = activeChart.addCandlestickSeries({
+      upColor: '#3fb950', downColor: '#f85149',
+      borderUpColor: '#3fb950', borderDownColor: '#f85149',
+      wickUpColor: '#3fb950', wickDownColor: '#f85149',
+    });
+    candleSeries.setData(data.candles);
+
+    const volumeSeries = activeChart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'vol',
+    });
+    activeChart.priceScale('vol').applyOptions({
+      scaleMargins: { top: 0.82, bottom: 0 },
+      visible: false,
+    });
+    volumeSeries.setData(data.candles.map(c => ({
+      time: c.time,
+      value: c.volume,
+      color: c.close >= c.open ? '#3fb95030' : '#f8514930',
+    })));
+
+    activeChart.timeScale().fitContent();
+
+    resizeObserver = new ResizeObserver(entries => {
+      if (activeChart && entries[0])
+        activeChart.resize(entries[0].contentRect.width, 280);
+    });
+    resizeObserver.observe(container);
+
+  } catch (err) {
+    container.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><span class="negative text-sm">Failed to load chart</span></div>';
+  }
+}
+
+// ── Details loader ──────────────────────────────────────────────────────────
+async function loadDetails(ticker) {
+  try {
+    const res = await fetch(`/api/stock/details?ticker=${encodeURIComponent(ticker)}`);
+    const data = await res.json();
+    const m = data.metrics || {};
+
+    // Update header price
+    if (m.currentPrice) {
+      document.getElementById('d-price').textContent =
+        m.currentPrice.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+    }
+    if (m.currentPrice && m.previousClose && m.previousClose !== 0) {
+      const chg = (m.currentPrice - m.previousClose) / m.previousClose * 100;
+      const el = document.getElementById('d-change');
+      const isPos = chg >= 0;
+      el.textContent = `${isPos ? '▲' : '▼'} ${Math.abs(chg).toFixed(2)}%`;
+      el.style.cssText = `background:${isPos ? '#3fb95020' : '#f8514920'};color:${isPos ? '#3fb950' : '#f85149'};border-radius:5px;padding:2px 8px;`;
+    }
+    if (m.currency && m.currency !== 'USD') {
+      document.getElementById('d-currency').textContent = m.currency;
+    }
+    if (m.sector) {
+      const el = document.getElementById('d-sector');
+      el.textContent = m.sector;
+      el.style.display = '';
+    }
+
+    // 52-week range bar
+    const { fiftyTwoWeekLow: lo, fiftyTwoWeekHigh: hi, currentPrice: price } = m;
+    if (lo && hi && price) {
+      const pct = Math.min(100, Math.max(0, (price - lo) / (hi - lo) * 100)).toFixed(1);
+      document.getElementById('d-range').innerHTML = `
+        <div class="text-xs font-semibold mb-2" style="color:#8b949e;text-transform:uppercase;letter-spacing:.06em;">52-Week Range</div>
+        <div class="relative h-1.5 rounded-full mb-2" style="background:#21262d;">
+          <div class="absolute top-0 h-full rounded-l-full"
+               style="width:${pct}%;background:linear-gradient(90deg,#f85149,#e3b341 50%,#3fb950);min-width:4px;"></div>
+          <div class="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
+               style="left:calc(${pct}% - 6px);background:#e6edf3;box-shadow:0 0 0 2px #0d1117;"></div>
+        </div>
+        <div class="flex justify-between text-xs" style="color:#8b949e;">
+          <span>${lo.toFixed(2)}</span>
+          <span style="color:#e6edf3;">${price.toFixed(2)}</span>
+          <span>${hi.toFixed(2)}</span>
+        </div>`;
+    }
+
+    // Metrics grid
+    const items = [
+      { label:'Market Cap',  value: fmtMarketCap(m.marketCap) },
+      { label:'P/E (TTM)',   value: m.trailingPE ? m.trailingPE.toFixed(2)+'×' : '—' },
+      { label:'P/E (Fwd)',   value: m.forwardPE  ? m.forwardPE.toFixed(2)+'×'  : '—' },
+      { label:'EPS (TTM)',   value: m.trailingEPS ? (m.currency==='USD'?'$':'') + m.trailingEPS.toFixed(2) : '—' },
+      { label:'Beta',        value: m.beta ? m.beta.toFixed(2) : '—' },
+      { label:'Div Yield',   value: m.dividendYield ? (m.dividendYield*100).toFixed(2)+'%' : '—' },
+      { label:'Avg Volume',  value: fmtVol(m.averageVolume) },
+      { label:'Volume',      value: fmtVol(m.volume) },
+      { label:'Industry',    value: m.industry || '—' },
+    ];
+    document.getElementById('d-metrics').innerHTML = `
+      <div class="text-xs font-semibold mb-3" style="color:#8b949e;text-transform:uppercase;letter-spacing:.06em;">Key Metrics</div>
+      <div class="grid grid-cols-3 gap-2">
+        ${items.map(i => `
+          <div class="metric-card">
+            <div class="text-xs mb-1" style="color:#8b949e;">${i.label}</div>
+            <div class="text-sm font-medium" style="color:#e6edf3;">${i.value}</div>
+          </div>`).join('')}
+      </div>`;
+
+    // News
+    const articles = data.news || [];
+    document.getElementById('d-news').innerHTML = articles.length
+      ? articles.map(a => `
+          <a class="news-item mb-2" href="${a.link}" target="_blank" rel="noopener noreferrer">
+            <div class="text-sm font-medium mb-1" style="color:#e6edf3;line-height:1.4;">${a.title}</div>
+            <div class="text-xs" style="color:#8b949e;">${a.publisher}${a.time ? ' · '+timeAgo(a.time) : ''}</div>
+          </a>`).join('')
+      : '<p class="text-sm neutral">No recent news found.</p>';
+
+  } catch (err) {
+    document.getElementById('d-metrics').innerHTML = '<p class="text-sm negative">Failed to load details.</p>';
+    document.getElementById('d-news').innerHTML = '';
+  }
+}
+
+// ── Period selector click ───────────────────────────────────────────────────
+document.getElementById('period-selector').addEventListener('click', e => {
+  const btn = e.target.closest('.period-btn');
+  if (!btn || !currentTicker) return;
+  currentPeriod = btn.dataset.period;
+  loadChart(currentTicker, currentPeriod);
+});
+
+// ── Init ────────────────────────────────────────────────────────────────────
+document.getElementById('refresh-btn').addEventListener('click', loadData);
+setInterval(loadData, 5 * 60 * 1000);
+loadData();
+</script>
+</body>
+</html>
