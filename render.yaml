@@ -14,3 +14,5 @@ services:
         sync: false   # set in Render dashboard: libsql://<db-name>.turso.io
       - key: TURSO_AUTH_TOKEN
         sync: false   # set in Render dashboard: token from `turso db tokens create <db-name>`
+      - key: FINNHUB_API_KEY
+        sync: false   # set in Render dashboard: free key from finnhub.io/register

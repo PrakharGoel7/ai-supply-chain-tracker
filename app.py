@@ -321,6 +321,55 @@ def get_chart():
 
 # ── details endpoint ──────────────────────────────────────────────────────────
 
+def _finnhub_fundamentals(ticker):
+    """
+    Fetch PE, EPS, beta, dividend yield, market cap, and company profile from
+    Finnhub (free tier, 60 req/min, no cloud-IP rate limiting).
+    Returns a dict of fundamentals, or None if the key is missing or the ticker
+    isn't covered (e.g. some international symbols).
+    """
+    api_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    # Finnhub uses plain symbols without exchange suffixes for most tickers.
+    # e.g. "SU.PA" → "SU", "005930.KS" → "005930"
+    symbol = ticker.split(".")[0] if "." in ticker else ticker
+
+    try:
+        base = "https://finnhub.io/api/v1"
+        headers = {"X-Finnhub-Token": api_key}
+
+        profile = http_requests.get(
+            f"{base}/stock/profile2", params={"symbol": symbol},
+            headers=headers, timeout=6
+        ).json()
+
+        if not profile.get("name"):
+            return None  # ticker not found in Finnhub
+
+        m = http_requests.get(
+            f"{base}/stock/metric", params={"symbol": symbol, "metric": "all"},
+            headers=headers, timeout=6
+        ).json().get("metric", {})
+
+        market_cap_raw = profile.get("marketCapitalization")  # Finnhub returns millions
+        return {
+            "shortName":    profile.get("name", ticker),
+            "sector":       profile.get("finnhubIndustry", ""),
+            "industry":     profile.get("finnhubIndustry", ""),
+            "currency":     profile.get("currency", "USD"),
+            "marketCap":    market_cap_raw * 1_000_000 if market_cap_raw else None,
+            "trailingPE":   clean(m.get("peTTM")),
+            "forwardPE":    clean(m.get("peNormalizedAnnual")),
+            "trailingEPS":  clean(m.get("epsTTM")),
+            "beta":         clean(m.get("beta")),
+            "dividendYield": clean(m.get("dividendYieldIndicatedAnnual")),
+        }
+    except Exception:
+        return None
+
+
 @app.route("/api/stock/details")
 def get_details():
     ticker = request.args.get("ticker", "")
@@ -335,48 +384,47 @@ def get_details():
 
     try:
         t = yf.Ticker(ticker)
-        fi = t.fast_info   # uses chart endpoint — not rate-limited like .info
+        fi = t.fast_info   # chart endpoint — never rate-limited
         articles = parse_news(t.news)
 
-        # fast_info gives us price/volume/52wk data without hitting quoteSummary.
-        # Attempt .info for fundamentals (PE, EPS, beta) but fall back silently.
-        pe = forward_pe = eps = beta = div_yield = None
-        short_name = ticker
-        sector = industry = ""
-        currency = getattr(fi, "currency", "USD") or "USD"
-        try:
-            info = t.info
-            short_name  = info.get("shortName") or info.get("longName", ticker)
-            sector      = info.get("sector", "")
-            industry    = info.get("industry", "")
-            currency    = info.get("currency", currency)
-            pe          = clean(info.get("trailingPE"))
-            forward_pe  = clean(info.get("forwardPE"))
-            eps         = clean(info.get("trailingEPS"))
-            beta        = clean(info.get("beta"))
-            div_yield   = clean(info.get("dividendYield"))
-        except Exception:
-            pass
-
-        metrics = {
-            "shortName":       short_name,
-            "sector":          sector,
-            "industry":        industry,
-            "currency":        currency,
-            "marketCap":       getattr(fi, "market_cap", None),
-            "trailingPE":      pe,
-            "forwardPE":       forward_pe,
-            "trailingEPS":     eps,
-            "beta":            beta,
-            "dividendYield":   div_yield,
+        # Price/volume/52wk range from fast_info (always available)
+        price_metrics = {
             "fiftyTwoWeekHigh": clean(getattr(fi, "fifty_two_week_high", None)),
             "fiftyTwoWeekLow":  clean(getattr(fi, "fifty_two_week_low", None)),
-            "averageVolume":   getattr(fi, "three_month_average_volume", None),
-            "volume":          getattr(fi, "last_volume", None),
-            "currentPrice":    clean(getattr(fi, "last_price", None)),
-            "previousClose":   clean(getattr(fi, "previous_close", None)),
+            "averageVolume":    getattr(fi, "three_month_average_volume", None),
+            "volume":           getattr(fi, "last_volume", None),
+            "currentPrice":     clean(getattr(fi, "last_price", None)),
+            "previousClose":    clean(getattr(fi, "previous_close", None)),
         }
 
+        # Fundamentals: Finnhub first, fall back to yfinance .info
+        fund = _finnhub_fundamentals(ticker)
+        if fund is None:
+            fund = {}
+            try:
+                info       = t.info
+                fund = {
+                    "shortName":    info.get("shortName") or info.get("longName", ticker),
+                    "sector":       info.get("sector", ""),
+                    "industry":     info.get("industry", ""),
+                    "currency":     info.get("currency", getattr(fi, "currency", "USD") or "USD"),
+                    "marketCap":    info.get("marketCap"),
+                    "trailingPE":   clean(info.get("trailingPE")),
+                    "forwardPE":    clean(info.get("forwardPE")),
+                    "trailingEPS":  clean(info.get("trailingEPS")),
+                    "beta":         clean(info.get("beta")),
+                    "dividendYield": clean(info.get("dividendYield")),
+                }
+            except Exception:
+                fund = {
+                    "shortName": ticker, "sector": "", "industry": "",
+                    "currency": getattr(fi, "currency", "USD") or "USD",
+                    "marketCap": getattr(fi, "market_cap", None),
+                    "trailingPE": None, "forwardPE": None, "trailingEPS": None,
+                    "beta": None, "dividendYield": None,
+                }
+
+        metrics = {**fund, **price_metrics}
         result = {"metrics": metrics, "news": articles}
         with _cache_lock:
             _detail_cache[ticker] = {"data": result, "time": time.time()}
