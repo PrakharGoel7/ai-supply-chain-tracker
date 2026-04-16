@@ -11,6 +11,7 @@ import os
 import sqlite3
 import boto3
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -231,6 +232,24 @@ def parse_news(news_raw):
 # Uses yf.download() — a single batched request — instead of per-ticker .info
 # calls, which hit Yahoo's quoteSummary API and get rate-limited on cloud IPs.
 
+def _finnhub_pe(ticker):
+    """Return trailing PE for one ticker from Finnhub, or None."""
+    api_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not api_key:
+        return None
+    symbol = ticker.split(".")[0] if "." in ticker else ticker
+    try:
+        m = http_requests.get(
+            "https://finnhub.io/api/v1/stock/metric",
+            params={"symbol": symbol, "metric": "all"},
+            headers={"X-Finnhub-Token": api_key},
+            timeout=6,
+        ).json().get("metric", {})
+        return clean(m.get("peTTM"))
+    except Exception:
+        return None
+
+
 @app.route("/api/stocks")
 def get_stocks():
     global _cache, _cache_time
@@ -266,6 +285,15 @@ def get_stocks():
     except Exception as e:
         results = {t: {"price": None, "pe_ratio": None, "daily_change": None, "weekly_change": None, "error": str(e)}
                    for t in TICKERS}
+
+    # Fetch PE ratios from Finnhub concurrently (one request per ticker)
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        pe_futures = {ex.submit(_finnhub_pe, t): t for t in TICKERS}
+        for future in as_completed(pe_futures):
+            t = pe_futures[future]
+            pe = future.result()
+            if t in results:
+                results[t]["pe_ratio"] = pe
 
     with _cache_lock:
         _cache = results
