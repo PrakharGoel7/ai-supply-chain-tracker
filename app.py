@@ -8,7 +8,7 @@ import math
 import json
 import calendar
 import os
-import libsql_experimental as libsql
+import sqlite3
 import boto3
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -81,17 +81,98 @@ PERIOD_MAP = {
 }
 
 # ── GPU price database ────────────────────────────────────────────────────────
-# When TURSO_DB_URL + TURSO_AUTH_TOKEN are set (production), connects to the
-# free Turso cloud DB.  Otherwise falls back to a local gpu_prices.db file.
+# Production: uses Turso cloud SQLite over its HTTP pipeline API (no extra deps).
+# Local dev:  falls back to a plain sqlite3 file.
 _TURSO_URL   = os.environ.get("TURSO_DB_URL", "").strip()
 _TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
 _LOCAL_DB    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_prices.db")
 
 
+def _decode_turso(v):
+    t = v.get("type")
+    val = v.get("value")
+    if t == "null" or val is None:
+        return None
+    if t == "integer":
+        return int(val)
+    if t == "float":
+        return float(val)
+    return val
+
+
+class _TursoCursor:
+    def __init__(self, result):
+        self._rows = []
+        if result and "rows" in result:
+            for row in result["rows"]:
+                self._rows.append(tuple(_decode_turso(v) for v in row))
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return self._rows
+
+
+class _TursoDB:
+    """Minimal sqlite3-compatible wrapper over the Turso HTTP pipeline API."""
+    _CHUNK = 200
+
+    def __init__(self, url, token):
+        self._url = url.replace("libsql://", "https://") + "/v2/pipeline"
+        self._headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+    def _pipeline(self, stmts):
+        body = {
+            "requests": [{"type": "execute", "stmt": s} for s in stmts]
+                        + [{"type": "close"}]
+        }
+        r = http_requests.post(self._url, headers=self._headers, json=body, timeout=20)
+        r.raise_for_status()
+        return r.json()["results"]
+
+    @staticmethod
+    def _args(params):
+        out = []
+        for p in params:
+            if p is None:
+                out.append({"type": "null"})
+            elif isinstance(p, float):
+                out.append({"type": "float", "value": p})
+            elif isinstance(p, int):
+                out.append({"type": "integer", "value": str(p)})
+            else:
+                out.append({"type": "text", "value": str(p)})
+        return out
+
+    def execute(self, sql, params=()):
+        stmt = {"sql": sql}
+        if params:
+            stmt["args"] = self._args(params)
+        results = self._pipeline([stmt])
+        if results[0]["type"] != "ok":
+            raise Exception(f"Turso error: {results[0]}")
+        return _TursoCursor(results[0]["response"]["result"])
+
+    def executemany(self, sql, params_list):
+        stmts = [{"sql": sql, "args": self._args(p)} for p in params_list]
+        for i in range(0, len(stmts), self._CHUNK):
+            self._pipeline(stmts[i:i + self._CHUNK])
+
+    def commit(self):
+        pass  # Turso HTTP API auto-commits each statement
+
+    def close(self):
+        pass
+
+
 def _db_connect():
     if _TURSO_URL and _TURSO_TOKEN:
-        return libsql.connect(_TURSO_URL, auth_token=_TURSO_TOKEN)
-    return libsql.connect(_LOCAL_DB)
+        return _TursoDB(_TURSO_URL, _TURSO_TOKEN)
+    return sqlite3.connect(_LOCAL_DB)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
