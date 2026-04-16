@@ -11,7 +11,6 @@ import os
 import sqlite3
 import boto3
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -229,45 +228,8 @@ def parse_news(news_raw):
 
 
 # ── main price cache ──────────────────────────────────────────────────────────
-
-def fetch_ticker(ticker):
-    try:
-        t = yf.Ticker(ticker)
-        hist = t.history(period="5d")
-        info = t.info
-
-        current_price = (
-            clean(info.get("currentPrice"))
-            or clean(info.get("regularMarketPrice"))
-            or (clean(hist["Close"].iloc[-1]) if len(hist) > 0 else None)
-        )
-        prev_close = (
-            clean(info.get("previousClose"))
-            or clean(info.get("regularMarketPreviousClose"))
-            or (clean(hist["Close"].iloc[-2]) if len(hist) >= 2 else None)
-        )
-        pe_ratio = clean(info.get("trailingPE"))
-
-        daily_change = None
-        if current_price and prev_close and prev_close != 0:
-            daily_change = round((current_price - prev_close) / prev_close * 100, 2)
-
-        weekly_change = None
-        if len(hist) >= 2:
-            wo = clean(hist["Close"].iloc[0])
-            wc = clean(hist["Close"].iloc[-1])
-            if wo and wc and wo != 0:
-                weekly_change = round((wc - wo) / wo * 100, 2)
-
-        return ticker, {
-            "price": round(current_price, 2) if current_price is not None else None,
-            "pe_ratio": round(pe_ratio, 2) if pe_ratio is not None else None,
-            "daily_change": daily_change,
-            "weekly_change": weekly_change,
-        }
-    except Exception as e:
-        return ticker, {"price": None, "pe_ratio": None, "daily_change": None, "weekly_change": None, "error": str(e)}
-
+# Uses yf.download() — a single batched request — instead of per-ticker .info
+# calls, which hit Yahoo's quoteSummary API and get rate-limited on cloud IPs.
 
 @app.route("/api/stocks")
 def get_stocks():
@@ -277,17 +239,37 @@ def get_stocks():
         if _cache and now - _cache_time < CACHE_TTL:
             return safe_json({"stocks": _cache, "last_updated": _cache_time, "cached": True})
 
-    results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fetch_ticker, t): t for t in TICKERS}
-        for future in as_completed(futures):
-            ticker, data = future.result()
-            results[ticker] = data
+    try:
+        raw = yf.download(
+            " ".join(TICKERS),
+            period="5d",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+        )
+        closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        results = {}
+        for ticker in TICKERS:
+            try:
+                series = closes[ticker].dropna() if ticker in closes.columns else pd.Series(dtype=float)
+                current = clean(series.iloc[-1]) if len(series) >= 1 else None
+                prev    = clean(series.iloc[-2]) if len(series) >= 2 else None
+                first   = clean(series.iloc[0])  if len(series) >= 1 else None
+                results[ticker] = {
+                    "price":         round(current, 2) if current is not None else None,
+                    "pe_ratio":      None,
+                    "daily_change":  round((current - prev) / prev * 100, 2) if current and prev else None,
+                    "weekly_change": round((current - first) / first * 100, 2) if current and first else None,
+                }
+            except Exception:
+                results[ticker] = {"price": None, "pe_ratio": None, "daily_change": None, "weekly_change": None}
+    except Exception as e:
+        results = {t: {"price": None, "pe_ratio": None, "daily_change": None, "weekly_change": None, "error": str(e)}
+                   for t in TICKERS}
 
     with _cache_lock:
         _cache = results
         _cache_time = time.time()
-
     return safe_json({"stocks": results, "last_updated": _cache_time, "cached": False})
 
 
@@ -353,26 +335,46 @@ def get_details():
 
     try:
         t = yf.Ticker(ticker)
-        info = t.info
+        fi = t.fast_info   # uses chart endpoint — not rate-limited like .info
         articles = parse_news(t.news)
 
+        # fast_info gives us price/volume/52wk data without hitting quoteSummary.
+        # Attempt .info for fundamentals (PE, EPS, beta) but fall back silently.
+        pe = forward_pe = eps = beta = div_yield = None
+        short_name = ticker
+        sector = industry = ""
+        currency = getattr(fi, "currency", "USD") or "USD"
+        try:
+            info = t.info
+            short_name  = info.get("shortName") or info.get("longName", ticker)
+            sector      = info.get("sector", "")
+            industry    = info.get("industry", "")
+            currency    = info.get("currency", currency)
+            pe          = clean(info.get("trailingPE"))
+            forward_pe  = clean(info.get("forwardPE"))
+            eps         = clean(info.get("trailingEPS"))
+            beta        = clean(info.get("beta"))
+            div_yield   = clean(info.get("dividendYield"))
+        except Exception:
+            pass
+
         metrics = {
-            "shortName": info.get("shortName") or info.get("longName", ticker),
-            "sector": info.get("sector", ""),
-            "industry": info.get("industry", ""),
-            "currency": info.get("currency", "USD"),
-            "marketCap": info.get("marketCap"),
-            "trailingPE": clean(info.get("trailingPE")),
-            "forwardPE": clean(info.get("forwardPE")),
-            "trailingEPS": clean(info.get("trailingEPS")),
-            "beta": clean(info.get("beta")),
-            "dividendYield": clean(info.get("dividendYield")),
-            "fiftyTwoWeekHigh": clean(info.get("fiftyTwoWeekHigh")),
-            "fiftyTwoWeekLow": clean(info.get("fiftyTwoWeekLow")),
-            "averageVolume": info.get("averageVolume"),
-            "volume": info.get("regularMarketVolume") or info.get("volume"),
-            "currentPrice": clean(info.get("currentPrice") or info.get("regularMarketPrice")),
-            "previousClose": clean(info.get("previousClose") or info.get("regularMarketPreviousClose")),
+            "shortName":       short_name,
+            "sector":          sector,
+            "industry":        industry,
+            "currency":        currency,
+            "marketCap":       getattr(fi, "market_cap", None),
+            "trailingPE":      pe,
+            "forwardPE":       forward_pe,
+            "trailingEPS":     eps,
+            "beta":            beta,
+            "dividendYield":   div_yield,
+            "fiftyTwoWeekHigh": clean(getattr(fi, "fifty_two_week_high", None)),
+            "fiftyTwoWeekLow":  clean(getattr(fi, "fifty_two_week_low", None)),
+            "averageVolume":   getattr(fi, "three_month_average_volume", None),
+            "volume":          getattr(fi, "last_volume", None),
+            "currentPrice":    clean(getattr(fi, "last_price", None)),
+            "previousClose":   clean(getattr(fi, "previous_close", None)),
         }
 
         result = {"metrics": metrics, "news": articles}
