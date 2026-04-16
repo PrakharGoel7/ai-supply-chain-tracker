@@ -38,8 +38,10 @@ TICKERS = [
     "EQIX", "DLR",
     # Power & Cooling
     "VRT", "ETN", "GEV", "SU.PA", "ABBN.SW", "SIE.DE",
+    # Utilities
+    "CEG", "VST", "D", "SO", "AEP",
     # Energy
-    "NEE", "FSLR", "ENPH", "XOM", "CVX", "TSLA",
+    "FSLR", "ENPH", "XOM", "CVX", "TSLA",
 ]
 
 _cache = {}
@@ -83,7 +85,8 @@ CATEGORY_TICKERS = {
     "Cloud Platforms":    ["AMZN", "MSFT", "GOOGL", "META", "ORCL"],
     "Data Center REITs":  ["EQIX", "DLR"],
     "Power & Cooling":    ["VRT", "ETN", "GEV", "SU.PA", "ABBN.SW", "SIE.DE"],
-    "Energy":             ["NEE", "FSLR", "ENPH", "XOM", "CVX", "TSLA"],
+    "Utilities":          ["CEG", "VST", "NEE", "D", "SO", "AEP"],
+    "Energy":             ["FSLR", "ENPH", "XOM", "CVX", "TSLA"],
 }
 
 PERIOD_MAP = {
