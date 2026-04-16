@@ -8,6 +8,7 @@ import math
 import json
 import calendar
 import os
+import libsql_experimental as libsql
 import boto3
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -78,6 +79,19 @@ PERIOD_MAP = {
     "3M": ("3mo", "1d"),
     "1Y": ("1y",  "1d"),
 }
+
+# ── GPU price database ────────────────────────────────────────────────────────
+# When TURSO_DB_URL + TURSO_AUTH_TOKEN are set (production), connects to the
+# free Turso cloud DB.  Otherwise falls back to a local gpu_prices.db file.
+_TURSO_URL   = os.environ.get("TURSO_DB_URL", "").strip()
+_TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+_LOCAL_DB    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_prices.db")
+
+
+def _db_connect():
+    if _TURSO_URL and _TURSO_TOKEN:
+        return libsql.connect(_TURSO_URL, auth_token=_TURSO_TOKEN)
+    return libsql.connect(_LOCAL_DB)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -410,14 +424,23 @@ def get_monthly():
 
 # ── GPU spot price history ────────────────────────────────────────────────────
 
-@app.route("/api/gpu-prices")
-def get_gpu_prices():
-    now_t = time.time()
-    with _cache_lock:
-        cached = _gpu_cache.get("prices")
-        if cached and now_t - cached["time"] < 3600:
-            return safe_json(cached["data"])
+def _db_init():
+    """Create the GPU price table if it doesn't exist."""
+    conn = _db_connect()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS gpu_daily_prices (
+            date       TEXT NOT NULL,
+            gpu_model  TEXT NOT NULL,
+            median_price REAL NOT NULL,
+            PRIMARY KEY (date, gpu_model)
+        )
+    """)
+    conn.commit()
+    conn.close()
 
+
+def _fetch_and_store_gpu_prices(days=2):
+    """Pull AWS spot price history for `days` days and upsert daily medians."""
     try:
         ec2 = boto3.client(
             "ec2",
@@ -425,19 +448,17 @@ def get_gpu_prices():
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
         )
-
         instance_types = list(GPU_INSTANCES.keys())
         all_prices = []
         paginator = ec2.get_paginator("describe_spot_price_history")
         for page in paginator.paginate(
             InstanceTypes=instance_types,
             ProductDescriptions=["Linux/UNIX"],
-            StartTime=datetime.utcnow() - timedelta(days=90),
+            StartTime=datetime.utcnow() - timedelta(days=days),
             EndTime=datetime.utcnow(),
         ):
             all_prices.extend(page["SpotPriceHistory"])
 
-        # Daily median $/GPU/hr grouped by GPU model
         daily: dict = defaultdict(lambda: defaultdict(list))
         for entry in all_prices:
             inst = entry["InstanceType"]
@@ -449,21 +470,69 @@ def get_gpu_prices():
             date = entry["Timestamp"].strftime("%Y-%m-%d")
             daily[gpu_model][date].append(price_per_gpu)
 
-        result = {}
+        rows = []
         for gpu_model, dates in daily.items():
-            series = []
-            for date in sorted(dates.keys()):
-                vals = dates[date]
+            for date, vals in dates.items():
                 vals.sort()
                 median = vals[len(vals) // 2]
-                series.append({"time": date, "value": round(median, 4)})
-            if series:
-                result[gpu_model] = series
+                rows.append((date, gpu_model, round(median, 4)))
 
-        data = {"gpus": result, "updated": time.time(), "region": "us-east-1"}
+        conn = _db_connect()
+        conn.executemany(
+            "INSERT OR REPLACE INTO gpu_daily_prices (date, gpu_model, median_price) VALUES (?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+        return len(rows)
+    except Exception as e:
+        print(f"[gpu-poller] Error fetching GPU prices: {e}")
+        return 0
+
+
+def _gpu_poller():
+    """Background thread: 90-day seed on first run, then hourly incremental updates."""
+    conn = _db_connect()
+    count = conn.execute("SELECT COUNT(*) FROM gpu_daily_prices").fetchone()[0]
+    conn.close()
+
+    if count == 0:
+        print("[gpu-poller] DB empty — seeding with 90-day history...")
+        n = _fetch_and_store_gpu_prices(days=90)
+        print(f"[gpu-poller] Seeded {n} daily price records")
+    else:
+        print(f"[gpu-poller] DB has {count} records — skipping initial seed")
+
+    while True:
+        time.sleep(3600)
+        n = _fetch_and_store_gpu_prices(days=2)
+        print(f"[gpu-poller] Hourly update: stored {n} records")
+        with _cache_lock:
+            _gpu_cache.clear()
+
+
+@app.route("/api/gpu-prices")
+def get_gpu_prices():
+    now_t = time.time()
+    with _cache_lock:
+        cached = _gpu_cache.get("prices")
+        if cached and now_t - cached["time"] < 3600:
+            return safe_json(cached["data"])
+
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT date, gpu_model, median_price FROM gpu_daily_prices ORDER BY date"
+        ).fetchall()
+        conn.close()
+
+        result: dict = defaultdict(list)
+        for date, gpu_model, median_price in rows:
+            result[gpu_model].append({"time": date, "value": median_price})
+
+        data = {"gpus": dict(result), "updated": time.time(), "region": "us-east-1"}
         with _cache_lock:
             _gpu_cache["prices"] = {"data": data, "time": time.time()}
-
         return safe_json(data)
     except Exception as e:
         return safe_json({"gpus": {}, "error": str(e)})
@@ -588,6 +657,11 @@ def get_eia_demand():
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+# ── startup: init DB and launch background GPU poller ─────────────────────────
+_db_init()
+threading.Thread(target=_gpu_poller, daemon=True, name="gpu-poller").start()
 
 
 if __name__ == "__main__":

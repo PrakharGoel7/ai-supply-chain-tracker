@@ -10,3 +10,7 @@ services:
         value: production
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: TURSO_DB_URL
+        sync: false   # set in Render dashboard: libsql://<db-name>.turso.io
+      - key: TURSO_AUTH_TOKEN
+        sync: false   # set in Render dashboard: token from `turso db tokens create <db-name>`

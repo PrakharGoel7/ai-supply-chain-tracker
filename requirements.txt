@@ -3,3 +3,4 @@ yfinance
 gunicorn
 boto3
 python-dotenv
+libsql-experimental
