@@ -20,15 +20,26 @@ load_dotenv()
 app = Flask(__name__)
 
 TICKERS = [
+    # AI Chips
+    "NVDA", "AMD", "INTC", "AVGO", "MRVL", "ARM",
+    # Memory
     "MU", "000660.KS", "005930.KS",
-    "GOOGL", "NVDA", "AMD", "AMZN", "MSFT",
-    "INTC", "DELL", "HPE",
-    "AVGO", "MRVL", "CSCO", "ANET",
-    "PSTG", "NTAP", "ORCL",
-    "EQIX", "DLR", "META",
-    "FSLR", "GEV", "NEE", "ENPH",
-    "XOM", "CVX", "TSLA",
-    "VRT", "SU.PA", "ABBN.SW", "ETN", "SIE.DE"
+    # Chip Manufacturing
+    "TSM", "ASML", "AMAT", "LRCX",
+    # Servers & Hardware
+    "SMCI", "DELL", "HPE",
+    # Networking
+    "CSCO", "ANET",
+    # Storage
+    "PSTG", "NTAP",
+    # Cloud Platforms
+    "AMZN", "MSFT", "GOOGL", "META", "ORCL",
+    # Data Center REITs
+    "EQIX", "DLR",
+    # Power & Cooling
+    "VRT", "ETN", "GEV", "SU.PA", "ABBN.SW", "SIE.DE",
+    # Energy
+    "NEE", "FSLR", "ENPH", "XOM", "CVX", "TSLA",
 ]
 
 _cache = {}
@@ -63,13 +74,16 @@ GPU_INSTANCES = {
 }
 
 CATEGORY_TICKERS = {
-    "Semiconductors":         ["MU","000660.KS","005930.KS","GOOGL","NVDA","AMD","AMZN","MSFT","INTC"],
-    "IT Infrastructure":      ["DELL","HPE","AVGO","MRVL","CSCO","ANET","NVDA","PSTG","NTAP"],
-    "Compute":                ["AMZN","MSFT","ORCL","GOOGL"],
-    "Developers & Operators": ["EQIX","DLR"],
-    "Data Centers":           ["MSFT","GOOGL","AMZN","META","ORCL"],
-    "Energy":                 ["FSLR","GEV","NEE","ENPH","XOM","CVX","TSLA"],
-    "Industrial Equipment":   ["VRT","SU.PA","ABBN.SW","ETN","SIE.DE","GEV"],
+    "AI Chips":           ["NVDA", "AMD", "INTC", "AVGO", "MRVL", "ARM"],
+    "Memory":             ["MU", "000660.KS", "005930.KS"],
+    "Chip Manufacturing": ["TSM", "ASML", "AMAT", "LRCX"],
+    "Servers & Hardware": ["SMCI", "DELL", "HPE"],
+    "Networking":         ["CSCO", "ANET", "AVGO", "MRVL"],
+    "Storage":            ["PSTG", "NTAP"],
+    "Cloud Platforms":    ["AMZN", "MSFT", "GOOGL", "META", "ORCL"],
+    "Data Center REITs":  ["EQIX", "DLR"],
+    "Power & Cooling":    ["VRT", "ETN", "GEV", "SU.PA", "ABBN.SW", "SIE.DE"],
+    "Energy":             ["NEE", "FSLR", "ENPH", "XOM", "CVX", "TSLA"],
 }
 
 PERIOD_MAP = {
