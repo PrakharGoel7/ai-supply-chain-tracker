@@ -39,7 +39,7 @@ _trends_cache = {}
 _gpu_cache = {}
 _eia_cache = {}
 _cache_lock = threading.Lock()
-CACHE_TTL = 300
+CACHE_TTL = 1800   # 30 min — reduces Yahoo Finance request frequency on cloud IPs
 DETAIL_TTL = 3600
 
 # ── EIA grid region config ────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ def get_stocks():
             return safe_json({"stocks": _cache, "last_updated": _cache_time, "cached": True})
 
     results = {}
-    with ThreadPoolExecutor(max_workers=12) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(fetch_ticker, t): t for t in TICKERS}
         for future in as_completed(futures):
             ticker, data = future.result()
