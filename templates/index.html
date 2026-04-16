@@ -276,102 +276,88 @@
 <script>
 // ── Stock structure ─────────────────────────────────────────────────────────
 const STRUCTURE = {
-  "Semiconductors": {
-    "Memory": [
-      { name:"Micron",   ticker:"MU" },
-      { name:"SK Hynix", ticker:"000660.KS" },
-      { name:"Samsung",  ticker:"005930.KS" }
-    ],
-    "GPUs & ASICs": [
-      { name:"Alphabet / Google", ticker:"GOOGL" },
-      { name:"NVIDIA",            ticker:"NVDA"  },
-      { name:"AMD",               ticker:"AMD"   },
-      { name:"Amazon / AWS",      ticker:"AMZN"  },
-      { name:"Microsoft",         ticker:"MSFT"  }
-    ],
-    "CPUs": [
-      { name:"AMD",     ticker:"AMD"  },
-      { name:"Intel",   ticker:"INTC" },
-      { name:"NVIDIA",  ticker:"NVDA" }
-    ]
-  },
-  "IT Infrastructure": {
-    "Servers": [
-      { name:"Dell Technologies",         ticker:"DELL" },
-      { name:"Hewlett Packard Enterprise", ticker:"HPE"  }
-    ],
-    "Networking": [
-      { name:"Broadcom",        ticker:"AVGO" },
-      { name:"Marvell",         ticker:"MRVL" },
-      { name:"Cisco",           ticker:"CSCO" },
-      { name:"Arista Networks", ticker:"ANET" },
-      { name:"NVIDIA",          ticker:"NVDA" }
-    ],
-    "Storage": [
-      { name:"Dell Technologies",         ticker:"DELL" },
-      { name:"Pure Storage",              ticker:"PSTG" },
-      { name:"NetApp",                    ticker:"NTAP" },
-      { name:"Hewlett Packard Enterprise", ticker:"HPE"  }
-    ]
-  },
-  "Compute": {
-    "Hyperscalers": [
-      { name:"Amazon",    ticker:"AMZN" },
-      { name:"Microsoft", ticker:"MSFT" },
-      { name:"Oracle",    ticker:"ORCL" },
-      { name:"Alphabet",  ticker:"GOOGL"}
-    ]
-  },
-  "Developers & Operators": [
-    { name:"Equinix",       ticker:"EQIX" },
-    { name:"Digital Realty",ticker:"DLR"  }
+  "AI Chips": [
+    { name:"NVIDIA",        ticker:"NVDA"  },
+    { name:"AMD",           ticker:"AMD"   },
+    { name:"Intel",         ticker:"INTC"  },
+    { name:"Broadcom",      ticker:"AVGO"  },
+    { name:"Marvell",       ticker:"MRVL"  },
+    { name:"ARM Holdings",  ticker:"ARM"   }
   ],
-  "Data Centers": [
-    { name:"Microsoft", ticker:"MSFT" },
-    { name:"Alphabet",  ticker:"GOOGL"},
-    { name:"Amazon",    ticker:"AMZN" },
-    { name:"Meta",      ticker:"META" },
-    { name:"Oracle",    ticker:"ORCL" }
+  "Memory": [
+    { name:"Micron",    ticker:"MU"        },
+    { name:"SK Hynix",  ticker:"000660.KS" },
+    { name:"Samsung",   ticker:"005930.KS" }
   ],
-  "Energy": {
-    "Renewables": [
-      { name:"First Solar",    ticker:"FSLR" },
-      { name:"GE Vernova",     ticker:"GEV"  },
-      { name:"NextEra Energy", ticker:"NEE"  },
-      { name:"Enphase",        ticker:"ENPH" }
-    ],
-    "Oil & Natural Gas": [
-      { name:"ExxonMobil", ticker:"XOM" },
-      { name:"Chevron",    ticker:"CVX" }
-    ],
-    "Batteries": [
-      { name:"Tesla", ticker:"TSLA" }
-    ]
-  },
-  "Industrial Equipment": {
-    "Electrical Equipment": [
-      { name:"Vertiv",             ticker:"VRT"     },
-      { name:"Schneider Electric", ticker:"SU.PA"   },
-      { name:"ABB",                ticker:"ABBN.SW" },
-      { name:"Eaton",              ticker:"ETN"     },
-      { name:"Siemens",            ticker:"SIE.DE"  },
-      { name:"GE Vernova",         ticker:"GEV"     }
-    ],
-    "Cooling": [
-      { name:"Vertiv",             ticker:"VRT"   },
-      { name:"Schneider Electric", ticker:"SU.PA" }
-    ]
-  }
+  "Chip Manufacturing": [
+    { name:"TSMC",              ticker:"TSM"  },
+    { name:"ASML",              ticker:"ASML" },
+    { name:"Applied Materials", ticker:"AMAT" },
+    { name:"Lam Research",      ticker:"LRCX" }
+  ],
+  "Servers & Hardware": [
+    { name:"Super Micro Computer",      ticker:"SMCI" },
+    { name:"Dell Technologies",         ticker:"DELL" },
+    { name:"Hewlett Packard Enterprise", ticker:"HPE"  }
+  ],
+  "Networking": [
+    { name:"Cisco",           ticker:"CSCO" },
+    { name:"Arista Networks", ticker:"ANET" },
+    { name:"Broadcom",        ticker:"AVGO" },
+    { name:"Marvell",         ticker:"MRVL" }
+  ],
+  "Storage": [
+    { name:"Pure Storage", ticker:"PSTG" },
+    { name:"NetApp",       ticker:"NTAP" }
+  ],
+  "Cloud Platforms": [
+    { name:"Amazon",          ticker:"AMZN"  },
+    { name:"Microsoft",       ticker:"MSFT"  },
+    { name:"Alphabet/Google", ticker:"GOOGL" },
+    { name:"Meta",            ticker:"META"  },
+    { name:"Oracle",          ticker:"ORCL"  }
+  ],
+  "Data Center REITs": [
+    { name:"Equinix",        ticker:"EQIX" },
+    { name:"Digital Realty", ticker:"DLR"  }
+  ],
+  "Power & Cooling": [
+    { name:"Vertiv",             ticker:"VRT"     },
+    { name:"Eaton",              ticker:"ETN"     },
+    { name:"GE Vernova",         ticker:"GEV"     },
+    { name:"Schneider Electric", ticker:"SU.PA"   },
+    { name:"ABB",                ticker:"ABBN.SW" },
+    { name:"Siemens",            ticker:"SIE.DE"  }
+  ],
+  "Utilities": [
+    { name:"Constellation Energy", ticker:"CEG" },
+    { name:"Vistra Energy",        ticker:"VST" },
+    { name:"NextEra Energy",       ticker:"NEE" },
+    { name:"Dominion Energy",      ticker:"D"   },
+    { name:"Southern Company",     ticker:"SO"  },
+    { name:"American Electric Power", ticker:"AEP" }
+  ],
+  "Energy": [
+    { name:"First Solar", ticker:"FSLR" },
+    { name:"Enphase",     ticker:"ENPH" },
+    { name:"ExxonMobil",  ticker:"XOM"  },
+    { name:"Chevron",     ticker:"CVX"  },
+    { name:"Tesla",       ticker:"TSLA" }
+  ]
 };
 
 const COLORS = {
-  "Semiconductors":         { border:"#238636", badge:"#238636" },
-  "IT Infrastructure":      { border:"#388bfd", badge:"#388bfd" },
-  "Compute":                { border:"#a371f7", badge:"#a371f7" },
-  "Developers & Operators": { border:"#db6d28", badge:"#db6d28" },
-  "Data Centers":           { border:"#1f6feb", badge:"#1f6feb" },
-  "Energy":                 { border:"#e3b341", badge:"#e3b341" },
-  "Industrial Equipment":   { border:"#8b949e", badge:"#8b949e" }
+  "AI Chips":           { border:"#a371f7", badge:"#a371f7" },
+  "Memory":             { border:"#238636", badge:"#238636" },
+  "Chip Manufacturing": { border:"#388bfd", badge:"#388bfd" },
+  "Servers & Hardware": { border:"#db6d28", badge:"#db6d28" },
+  "Networking":         { border:"#1f6feb", badge:"#1f6feb" },
+  "Storage":            { border:"#8b949e", badge:"#8b949e" },
+  "Cloud Platforms":    { border:"#e3b341", badge:"#e3b341" },
+  "Data Center REITs":  { border:"#f78166", badge:"#f78166" },
+  "Power & Cooling":    { border:"#39d353", badge:"#39d353" },
+  "Utilities":          { border:"#79c0ff", badge:"#79c0ff" },
+  "Energy":             { border:"#ffa657", badge:"#ffa657" }
 };
 
 // ── Format helpers ──────────────────────────────────────────────────────────
