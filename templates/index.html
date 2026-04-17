@@ -31,6 +31,15 @@
     ::-webkit-scrollbar { width:6px; }
     ::-webkit-scrollbar-track { background:#0d1117; }
     ::-webkit-scrollbar-thumb { background:#30363d; border-radius:3px; }
+    /* ── Heat Map ── */
+    .hm-tile { border-radius:8px; padding:10px 12px; width:124px; min-height:84px; display:flex; flex-direction:column; justify-content:space-between; cursor:pointer; border:1px solid; transition:transform .12s, box-shadow .12s; flex-shrink:0; }
+    .hm-tile:hover { transform:scale(1.07); box-shadow:0 4px 24px rgba(0,0,0,.55); z-index:2; position:relative; }
+    .hm-name  { font-size:.58rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3; }
+    .hm-ticker{ font-size:.78rem; font-weight:700; margin-top:1px; }
+    .hm-pct   { font-size:.92rem; font-weight:700; margin-top:3px; }
+    .hm-price { font-size:.6rem;  margin-top:1px; opacity:.8; }
+    .hm-cat-label { font-size:.68rem; font-weight:600; text-transform:uppercase; letter-spacing:.07em; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+    .hm-row   { display:flex; flex-wrap:wrap; gap:6px; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -55,6 +64,7 @@
 <div style="background:#161b22;border-bottom:1px solid #30363d;">
   <div class="max-w-screen-xl mx-auto px-6 flex">
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="heatmap">Heat Map</button>
     <button class="tab-btn" data-tab="monthly">Monthly Top 5</button>
     <button class="tab-btn" data-tab="trends">Category Trends</button>
     <button class="tab-btn" data-tab="gpu">GPU Pricing</button>
@@ -213,6 +223,32 @@
       <div id="gpu-signal" class="px-5 py-4 text-sm neutral">Loading…</div>
     </section>
 
+  </main>
+</div>
+
+<!-- ── Heat Map tab ──────────────────────────────────────────────────────── -->
+<div id="tab-heatmap" style="display:none;">
+  <main class="max-w-screen-xl mx-auto px-6 py-8">
+    <section class="card rounded-xl overflow-hidden">
+      <div class="px-5 py-3 flex items-center justify-between flex-wrap gap-3" style="border-bottom:1px solid #30363d;">
+        <div class="flex items-center gap-3">
+          <span class="category-badge" style="background:#1a1a2a;color:#388bfd;border:1px solid #388bfd44;">Heat Map</span>
+          <span class="text-xs neutral">daily % change · click any tile for details</span>
+        </div>
+        <div class="flex items-center gap-2 text-xs neutral">
+          <span>Worse</span>
+          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(189,34,34);"></span>
+          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(100,30,30);"></span>
+          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:#21262d;border:1px solid #30363d;"></span>
+          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,80,45);"></span>
+          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,127,55);"></span>
+          <span>Better</span>
+        </div>
+      </div>
+      <div id="heatmap-grid" class="p-5" style="display:flex;flex-direction:column;gap:20px;">
+        <div class="text-center py-8 neutral text-sm">Loading…</div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -469,6 +505,8 @@ function renderDashboard(stockData) {
 
 // ── Main data loader ────────────────────────────────────────────────────────
 let isLoading = false;
+let lastStockData = null;
+
 async function loadData() {
   if (isLoading) return;
   isLoading = true;
@@ -477,7 +515,9 @@ async function loadData() {
   try {
     const res = await fetch('/api/stocks');
     const json = await res.json();
+    lastStockData = json.stocks;
     renderDashboard(json.stocks);
+    renderHeatmap(json.stocks);
     const dt = new Date(json.last_updated * 1000);
     document.getElementById('last-updated').textContent =
       `Last updated: ${dt.toLocaleTimeString()}${json.cached ? ' (cached)' : ''}`;
@@ -487,6 +527,69 @@ async function loadData() {
   } finally {
     isLoading = false; btn.textContent = '↻ Refresh'; btn.disabled = false;
   }
+}
+
+// ── Heat Map ─────────────────────────────────────────────────────────────────
+function heatColor(pct) {
+  if (pct === null || pct === undefined) {
+    return { bg:'#21262d', border:'#30363d', text:'#8b949e' };
+  }
+  const v = Math.max(-6, Math.min(6, pct));
+  let r, g, b;
+  if (v >= 0) {
+    const t = v / 6;
+    r = Math.round(33 - 33 * t);
+    g = Math.round(38 + (127 - 38) * t);
+    b = Math.round(45 - 45 * t);
+  } else {
+    const t = (-v) / 6;
+    r = Math.round(33 + (189 - 33) * t);
+    g = Math.round(38 - 38 * t);
+    b = Math.round(45 - 45 * t);
+  }
+  const bg   = `rgb(${r},${g},${b})`;
+  const text = Math.abs(v) > 1.8 ? '#ffffff' : '#c9d1d9';
+  const border = Math.abs(v) > 1.8
+    ? (v > 0 ? 'rgba(63,185,80,.35)' : 'rgba(248,81,73,.35)')
+    : 'rgba(255,255,255,.07)';
+  return { bg, border, text };
+}
+
+function renderHeatmap(stockData) {
+  const container = document.getElementById('heatmap-grid');
+  if (!container || !stockData) return;
+  let html = '';
+  for (const [catName, stocks] of Object.entries(STRUCTURE)) {
+    const col = COLORS[catName] || { badge:'#8b949e' };
+    const tiles = stocks.map(s => {
+      const d   = stockData[s.ticker] || {};
+      const pct = d.daily_change;
+      const { bg, border, text } = heatColor(pct);
+      const sign   = pct > 0 ? '+' : '';
+      const pctStr = pct != null ? `${sign}${pct.toFixed(2)}%` : '—';
+      const price  = d.price;
+      const priceStr = price != null
+        ? (price >= 1000 ? `$${(price/1000).toFixed(1)}k` : `$${price.toFixed(2)}`)
+        : '';
+      const safeName = s.name.replace(/'/g, "\\'");
+      return `<div class="hm-tile" style="background:${bg};border-color:${border};"
+                   onclick="showStock('${s.ticker}','${safeName}')">
+        <div class="hm-name"   style="color:${text}cc;">${s.name}</div>
+        <div class="hm-ticker" style="color:${text};">${s.ticker}</div>
+        <div class="hm-pct"    style="color:${text};">${pctStr}</div>
+        ${priceStr ? `<div class="hm-price" style="color:${text}99;">${priceStr}</div>` : ''}
+      </div>`;
+    }).join('');
+    html += `
+      <div>
+        <div class="hm-cat-label" style="color:${col.badge};">
+          <span style="width:8px;height:8px;border-radius:50%;background:${col.badge};display:inline-block;flex-shrink:0;"></span>
+          ${catName}
+        </div>
+        <div class="hm-row">${tiles}</div>
+      </div>`;
+  }
+  container.innerHTML = html;
 }
 
 // ── Drawer state ────────────────────────────────────────────────────────────
@@ -714,13 +817,17 @@ document.getElementById('period-selector').addEventListener('click', e => {
 
 // ── Category colors (shared with backend CATEGORY_TICKERS) ───────────────────
 const CAT_COLORS = {
-  "Semiconductors":         "#238636",
-  "IT Infrastructure":      "#388bfd",
-  "Compute":                "#a371f7",
-  "Developers & Operators": "#db6d28",
-  "Data Centers":           "#1f6feb",
-  "Energy":                 "#e3b341",
-  "Industrial Equipment":   "#8b949e",
+  "AI Chips":           "#a371f7",
+  "Memory":             "#238636",
+  "Chip Manufacturing": "#388bfd",
+  "Servers & Hardware": "#db6d28",
+  "Networking":         "#1f6feb",
+  "Storage":            "#8b949e",
+  "Cloud Platforms":    "#e3b341",
+  "Data Center REITs":  "#f78166",
+  "Power & Cooling":    "#39d353",
+  "Utilities":          "#79c0ff",
+  "Energy":             "#ffa657",
 };
 
 // ── Tab switching ────────────────────────────────────────────────────────────
@@ -729,10 +836,12 @@ let trendsLoaded = false;
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.getElementById('tab-dashboard').style.display = name === 'dashboard' ? '' : 'none';
+  document.getElementById('tab-heatmap').style.display   = name === 'heatmap'   ? '' : 'none';
   document.getElementById('tab-monthly').style.display   = name === 'monthly'   ? '' : 'none';
   document.getElementById('tab-trends').style.display    = name === 'trends'    ? '' : 'none';
   document.getElementById('tab-gpu').style.display       = name === 'gpu'       ? '' : 'none';
   document.getElementById('tab-energy').style.display    = name === 'energy'    ? '' : 'none';
+  if (name === 'heatmap' && lastStockData) renderHeatmap(lastStockData);
   if (name === 'trends') {
     if (!trendsLoaded) { trendsLoaded = true; loadTrends('2y'); }
     else if (trendsChart) {
