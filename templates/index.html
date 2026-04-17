@@ -233,16 +233,23 @@
       <div class="px-5 py-3 flex items-center justify-between flex-wrap gap-3" style="border-bottom:1px solid #30363d;">
         <div class="flex items-center gap-3">
           <span class="category-badge" style="background:#1a1a2a;color:#388bfd;border:1px solid #388bfd44;">Heat Map</span>
-          <span class="text-xs neutral">daily % change · click any tile for details</span>
+          <span class="text-xs neutral" id="heatmap-subtitle">daily % change · click any tile for details</span>
         </div>
-        <div class="flex items-center gap-2 text-xs neutral">
-          <span>Worse</span>
-          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(189,34,34);"></span>
-          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(100,30,30);"></span>
-          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:#21262d;border:1px solid #30363d;"></span>
-          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,80,45);"></span>
-          <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,127,55);"></span>
-          <span>Better</span>
+        <div class="flex items-center gap-4 flex-wrap">
+          <div class="flex gap-1">
+            <button class="period-btn active" id="hm-btn-daily"  onclick="setHeatMetric('daily')">Daily %</button>
+            <button class="period-btn"        id="hm-btn-weekly" onclick="setHeatMetric('weekly')">Weekly %</button>
+            <button class="period-btn"        id="hm-btn-pe"     onclick="setHeatMetric('pe')">P/E</button>
+          </div>
+          <div class="flex items-center gap-2 text-xs neutral" id="heatmap-legend">
+            <span>Worse</span>
+            <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(189,34,34);"></span>
+            <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(100,30,30);"></span>
+            <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:#21262d;border:1px solid #30363d;"></span>
+            <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,80,45);"></span>
+            <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,127,55);"></span>
+            <span>Better</span>
+          </div>
         </div>
       </div>
       <div id="heatmap-grid" class="p-5" style="display:flex;flex-direction:column;gap:20px;">
@@ -530,11 +537,10 @@ async function loadData() {
 }
 
 // ── Heat Map ─────────────────────────────────────────────────────────────────
-function heatColor(pct) {
-  if (pct === null || pct === undefined) {
-    return { bg:'#21262d', border:'#30363d', text:'#8b949e' };
-  }
-  const v = Math.max(-6, Math.min(6, pct));
+let heatMetric = 'daily';
+
+// Convert a normalized score (-6 to +6, positive = good/green) to colors
+function _scoreToColor(v) {
   let r, g, b;
   if (v >= 0) {
     const t = v / 6;
@@ -547,12 +553,59 @@ function heatColor(pct) {
     g = Math.round(38 - 38 * t);
     b = Math.round(45 - 45 * t);
   }
-  const bg   = `rgb(${r},${g},${b})`;
-  const text = Math.abs(v) > 1.8 ? '#ffffff' : '#c9d1d9';
-  const border = Math.abs(v) > 1.8
-    ? (v > 0 ? 'rgba(63,185,80,.35)' : 'rgba(248,81,73,.35)')
-    : 'rgba(255,255,255,.07)';
-  return { bg, border, text };
+  return {
+    bg:     `rgb(${r},${g},${b})`,
+    text:   Math.abs(v) > 1.8 ? '#ffffff' : '#c9d1d9',
+    border: Math.abs(v) > 1.8 ? (v > 0 ? 'rgba(63,185,80,.35)' : 'rgba(248,81,73,.35)') : 'rgba(255,255,255,.07)',
+  };
+}
+
+function heatColor(value, metric) {
+  if (value === null || value === undefined) {
+    return { bg:'#21262d', border:'#30363d', text:'#8b949e' };
+  }
+  let score;
+  if (metric === 'pe') {
+    // Lower P/E = cheaper = greener; loss-making (negative) = red
+    if (value < 0)        score = -5;
+    else if (value <= 15) score =  5;
+    else if (value <= 25) score =  2.5;
+    else if (value <= 35) score =  0;
+    else if (value <= 50) score = -2.5;
+    else if (value <= 80) score = -4;
+    else                  score = -6;
+  } else {
+    score = Math.max(-6, Math.min(6, value)); // % change
+  }
+  return _scoreToColor(score);
+}
+
+const HM_SUBTITLES = {
+  daily:  'daily % change · click any tile for details',
+  weekly: '5-day % change · click any tile for details',
+  pe:     'P/E ratio · green = cheap · red = expensive · click any tile for details',
+};
+const HM_LEGENDS = {
+  daily:  { lo:'Worse',     hi:'Better'  },
+  weekly: { lo:'Worse',     hi:'Better'  },
+  pe:     { lo:'Expensive', hi:'Cheap'   },
+};
+
+function setHeatMetric(metric) {
+  heatMetric = metric;
+  ['daily','weekly','pe'].forEach(m =>
+    document.getElementById(`hm-btn-${m}`).classList.toggle('active', m === metric));
+  document.getElementById('heatmap-subtitle').textContent = HM_SUBTITLES[metric];
+  const { lo, hi } = HM_LEGENDS[metric];
+  document.getElementById('heatmap-legend').innerHTML = `
+    <span>${lo}</span>
+    <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(189,34,34);"></span>
+    <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(100,30,30);"></span>
+    <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:#21262d;border:1px solid #30363d;"></span>
+    <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,80,45);"></span>
+    <span style="display:inline-block;width:28px;height:16px;border-radius:3px;background:rgb(26,127,55);"></span>
+    <span>${hi}</span>`;
+  if (lastStockData) renderHeatmap(lastStockData);
 }
 
 function renderHeatmap(stockData) {
@@ -562,21 +615,28 @@ function renderHeatmap(stockData) {
   for (const [catName, stocks] of Object.entries(STRUCTURE)) {
     const col = COLORS[catName] || { badge:'#8b949e' };
     const tiles = stocks.map(s => {
-      const d   = stockData[s.ticker] || {};
-      const pct = d.daily_change;
-      const { bg, border, text } = heatColor(pct);
-      const sign   = pct > 0 ? '+' : '';
-      const pctStr = pct != null ? `${sign}${pct.toFixed(2)}%` : '—';
-      const price  = d.price;
+      const d = stockData[s.ticker] || {};
+      let value, displayStr;
+      if (heatMetric === 'weekly') {
+        value = d.weekly_change;
+        displayStr = value != null ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%` : '—';
+      } else if (heatMetric === 'pe') {
+        value = d.pe_ratio;
+        displayStr = value != null ? `${value.toFixed(1)}×` : '—';
+      } else {
+        value = d.daily_change;
+        displayStr = value != null ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%` : '—';
+      }
+      const { bg, border, text } = heatColor(value, heatMetric);
+      const price = d.price;
       const priceStr = price != null
-        ? (price >= 1000 ? `$${(price/1000).toFixed(1)}k` : `$${price.toFixed(2)}`)
-        : '';
+        ? (price >= 1000 ? `$${(price/1000).toFixed(1)}k` : `$${price.toFixed(2)}`) : '';
       const safeName = s.name.replace(/'/g, "\\'");
       return `<div class="hm-tile" style="background:${bg};border-color:${border};"
                    onclick="showStock('${s.ticker}','${safeName}')">
         <div class="hm-name"   style="color:${text}cc;">${s.name}</div>
         <div class="hm-ticker" style="color:${text};">${s.ticker}</div>
-        <div class="hm-pct"    style="color:${text};">${pctStr}</div>
+        <div class="hm-pct"    style="color:${text};">${displayStr}</div>
         ${priceStr ? `<div class="hm-price" style="color:${text}99;">${priceStr}</div>` : ''}
       </div>`;
     }).join('');
